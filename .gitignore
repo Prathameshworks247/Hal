@@ -1,0 +1,8 @@
+hal
+.env
+All_snags_data.xlsx
+all-MiniLM-L6-v2
+__pycache__
+snag_faiss_index
+snag_faiss_index/index.faiss
+tempCodeRunnerFile.py

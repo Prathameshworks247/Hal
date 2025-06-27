@@ -1,0 +1,26 @@
+fastapi
+uvicorn[standard]
+
+# LangChain & related components
+langchain
+langchain-community
+langchain-core
+
+# Embeddings
+sentence-transformers
+huggingface-hub
+
+# Vector store
+faiss-cpu
+
+# Typing & Logging (built-in, no need to install separately)
+# typing
+# logging
+
+# If you’re using dotenv to load env vars
+python-dotenv
+
+# If using Google GenAI (optional, but you imported it earlier)
+langchain-google-genai
+pandas
+json
