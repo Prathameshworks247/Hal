@@ -31,7 +31,7 @@ STATUS: {row.get("STATUS","")}
             "helicopter": row.get("HELI_NO", ""),
             "raised_by": row.get("RAISED_BY",""),
             "snag_date": str(row.get("SNAG_DATE", "")),
-            "raised_by": {row.get("RAISED_BY", "")},
+            "event": {row.get("EVENT", "")},
             "rectified_on": str(row.get("RECTIFICATION_DATE", ""))
         }
 
