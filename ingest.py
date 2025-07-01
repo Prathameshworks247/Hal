@@ -10,19 +10,14 @@ def load_snag_excel(file_path):
 
     docs = []
     for _, row in df.iterrows():
-        event_code = row.get("EVENT", "")
-        event_value = (
-            "Ground" if event_code == "GR"
-            else "Flight" if event_code == "FLT"
-            else event_code
-        )
+
         content = f"""
 SNAG: {row.get("SNAG_DESCRIPTION", "")}
 RECTIFICATION: {row.get("RECTIFICATION", "")}
 HELI NO: {row.get("HELI_NO", "")}
 HELI HOURS: {row.get("HELI_HOURS", "")}
 SNAG DATE: {row.get("SNAG_DATE", "")}
-EVENT: {event_value}
+EVENT: {row.get("EVENT", "")}
 RAISED BY: {row.get("RAISED_BY", "")}
 STATUS: {row.get("STATUS","")}
 """
@@ -31,7 +26,7 @@ STATUS: {row.get("STATUS","")}
             "helicopter": row.get("HELI_NO", ""),
             "raised_by": row.get("RAISED_BY",""),
             "snag_date": str(row.get("SNAG_DATE", "")),
-            "event": event_value,
+            "event": {row.get("EVENT", "")},
             "rectified_on": str(row.get("RECTIFICATION_DATE", ""))
         }
 
