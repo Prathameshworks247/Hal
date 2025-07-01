@@ -109,6 +109,11 @@ def get_chain():
         logger.error(f"Error in get_chain(): {str(e)}")
         raise
 
+from typing import List, Dict, Any
+import logging
+
+logger = logging.getLogger(__name__)
+
 def get_similar_snags_with_metadata(db, query: str, k: int = 5) -> List[Dict[str, Any]]:
     """
     Retrieve similar snags with their metadata and similarity scores
@@ -122,33 +127,26 @@ def get_similar_snags_with_metadata(db, query: str, k: int = 5) -> List[Dict[str
         List of dictionaries containing document content, metadata, and similarity scores
     """
     try:
-        # Get retriever
-        retriever = db.as_retriever(search_type="similarity", search_kwargs={"k": k})
-        
-        # Get similar documents
-        similar_docs = retriever.get_relevant_documents(query)
-        
-        # Also get similarity scores using similarity_search_with_score
+        # Get similar documents with scores
         docs_with_scores = db.similarity_search_with_score(query, k=k)
-        
-        # Combine documents with scores and metadata
+
         similar_snags = []
         for i, (doc, score) in enumerate(docs_with_scores):
             snag_info = {
                 'rank': i + 1,
                 'content': doc.page_content,
-                'metadata': doc.metadata if hasattr(doc, 'metadata') else {},
+                'metadata': doc.metadata,
                 'similarity_score': float(score),
                 'similarity_percentage': round((1 - score) * 100, 2)  # Convert distance to similarity percentage
             }
             similar_snags.append(snag_info)
-        
+
         return similar_snags
-        
+
     except Exception as e:
         logger.error(f"Error retrieving similar snags: {str(e)}")
         return []
-    
+
 def convert_numpy(obj):
     if isinstance(obj, dict):
         return {k: convert_numpy(v) for k, v in obj.items()}
@@ -184,7 +182,7 @@ def process_snag_query_json(chain, db, query: str) -> Dict[str, Any]:
         
         # Get similar snags with metadata
         similar_snags = get_similar_snags_with_metadata(db, query, k=5)
-        
+
         # Format as JSON
         json_results = display_results_as_json(rectification, similar_snags, query)
         
@@ -223,12 +221,13 @@ def display_results_as_json(rectification: str, similar_snags: List[Dict[str, An
             "based_on_historical_cases": len(similar_snags)
         },
         "similar_historical_snags": similar_snags,
-        "summary": {
+        "Analytics": {
             "total_similar_cases_found": len(similar_snags),
             "average_similarity_percentage": (round(sum(s['similarity_score'] for s in similar_snags) / len(similar_snags), 2))*100 if similar_snags else 0,
             "highest_similarity_percentage": (similar_snags[0]['similarity_score'])*100 if similar_snags else 0,
             "lowest_similarity_percentage": (similar_snags[-1]['similarity_score'])*100 if similar_snags else 0,
-            "recommendation_reliability": "high" if len(similar_snags) >= 3 and ((similar_snags[0]['similarity_score'])*100 > 75) else "medium" if len(similar_snags) >= 2 else "low"
+            "recommendation_reliability": "high" if len(similar_snags) >= 3 and ((similar_snags[0]['similarity_score'])*100 > 75) else "medium" if len(similar_snags) >= 2 else "low",
+            "charts": {}
         }
     }
     
