@@ -84,13 +84,12 @@ def get_chain():
         4. Parts that might need replacement
         5. Expected time to complete the fix
         6. atleast 6 different analytics with graph data [pie, bar, line,.. etc]
-
-        ---
-        FORMAT(DO NOT CHANGE ANYTHING):
         
+        FORMAT(DO NOT CHANGE ANYTHING):
+        ---
         Rectification:
         [Provide your detailed rectification steps here]
-
+        ---
         Analytics :
         [
         {{
@@ -110,7 +109,7 @@ def get_chain():
             }}
         }}
         ]
-        
+        ---
  
         IMPORTANT: The Analytics section must be valid JSON format with proper quotes and structure.
         """)
@@ -244,25 +243,16 @@ def process_snag_query_json(chain, db, query: str) -> Dict[str, Any]:
         }
 
 
-
-
 def extract_rectification_and_analytics(response_text: str) -> Dict[str, Any]:
-    """
-    Extracts the rectification recommendation and analytics JSON from an LLM response.
-    Expected format:
-    ---
-    Rectification:
-    <rectification text>
-    ---
-    Analytics:
-    <list of JSON objects>
-    """
+    import re
+    import json
+
     result = {
         "rectification": "",
         "analytics": []
     }
 
-    # Extract rectification block more robustly (up to next "---")
+    # Extract rectification
     rect_match = re.search(
         r"Rectification:\s*(.*?)\s*---", 
         response_text, 
@@ -273,7 +263,7 @@ def extract_rectification_and_analytics(response_text: str) -> Dict[str, Any]:
     else:
         print("⚠️ No rectification section found.")
 
-    # Extract analytics JSON block
+    # Extract and fix analytics
     analytics_match = re.search(
         r"Analytics\s*:\s*(\[[\s\S]*?\])", 
         response_text, 
@@ -281,7 +271,7 @@ def extract_rectification_and_analytics(response_text: str) -> Dict[str, Any]:
     )
     if analytics_match:
         analytics_str = analytics_match.group(1).strip()
-        print("🔍 Raw Analytics Extracted:\n", analytics_str)
+        analytics_str = analytics_str.replace("{{", "{").replace("}}", "}")  # ✅ FIX HERE
         try:
             result["analytics"] = json.loads(analytics_str)
         except json.JSONDecodeError as e:
@@ -290,6 +280,7 @@ def extract_rectification_and_analytics(response_text: str) -> Dict[str, Any]:
         print("⚠️ No analytics section found.")
 
     return result
+
 
 
 def display_results_as_json(response_text: str, similar_snags: List[Dict[str, Any]], query: str) -> Dict[str, Any]:
