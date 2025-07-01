@@ -19,6 +19,7 @@ from llm import get_llm
 import numpy as np
 import json
 import shutil
+import re
 
 app = FastAPI()
 app.add_middleware(
@@ -132,13 +133,19 @@ def get_similar_snags_with_metadata(db, query: str, k: int = 5) -> List[Dict[str
 
         similar_snags = []
         for i, (doc, score) in enumerate(docs_with_scores):
+
+            snag_match = re.search(r"SNAG:\s*(.*)", doc.page_content)
+            rect_match = re.search(r"RECTIFICATION:\s*(.*)", doc.page_content)
+
             snag_info = {
                 'rank': i + 1,
-                'content': doc.page_content,
+                'snag': snag_match.group(1).strip() if snag_match else "",
+                'rectification': rect_match.group(1).strip() if rect_match else "",
                 'metadata': doc.metadata,
                 'similarity_score': float(score),
-                'similarity_percentage': round((1 - score) * 100, 2)  # Convert distance to similarity percentage
+                'similarity_percentage': round((1 - score) * 100, 2)
             }
+
             similar_snags.append(snag_info)
 
         return similar_snags
