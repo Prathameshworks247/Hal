@@ -245,14 +245,15 @@ def process_snag_query_json(chain, db, query: str) -> Dict[str, Any]:
 
 
 
+
 def extract_rectification_and_analytics(response_text: str) -> Dict[str, Any]:
     """
     Extracts the rectification recommendation and analytics JSON from an LLM response.
     Expected format:
-    ---  
+    ---
     Rectification:
     <rectification text>
-    ---  
+    ---
     Analytics:
     <list of JSON objects>
     """
@@ -261,9 +262,9 @@ def extract_rectification_and_analytics(response_text: str) -> Dict[str, Any]:
         "analytics": []
     }
 
-    # Extract rectification block
+    # Extract rectification block more robustly (up to next "---")
     rect_match = re.search(
-        r"Rectification:\s*(.*?)\n\s*---", 
+        r"Rectification:\s*(.*?)\s*---", 
         response_text, 
         re.DOTALL | re.IGNORECASE
     )
@@ -272,14 +273,15 @@ def extract_rectification_and_analytics(response_text: str) -> Dict[str, Any]:
     else:
         print("⚠️ No rectification section found.")
 
-    # Extract analytics JSON block (more robust)
+    # Extract analytics JSON block
     analytics_match = re.search(
-        r"Analytics\s*:\s*(\[\s*[\s\S]*?\])", 
+        r"Analytics\s*:\s*(\[[\s\S]*?\])", 
         response_text, 
         re.DOTALL | re.IGNORECASE
     )
     if analytics_match:
-        analytics_str = analytics_match.group(1)
+        analytics_str = analytics_match.group(1).strip()
+        print("🔍 Raw Analytics Extracted:\n", analytics_str)
         try:
             result["analytics"] = json.loads(analytics_str)
         except json.JSONDecodeError as e:
@@ -289,11 +291,10 @@ def extract_rectification_and_analytics(response_text: str) -> Dict[str, Any]:
 
     return result
 
-from typing import List, Dict, Any
 
-def display_results_as_json(rectification: str, similar_snags: List[Dict[str, Any]], query: str) -> Dict[str, Any]:
-    """Format and display results as JSON"""
-    parsed = extract_rectification_and_analytics(rectification)
+def display_results_as_json(response_text: str, similar_snags: List[Dict[str, Any]], query: str) -> Dict[str, Any]:
+    """Format and display results as structured JSON"""
+    parsed = extract_rectification_and_analytics(response_text)
 
     num_snags = len(similar_snags)
     similarity_scores = [s['similarity_score'] for s in similar_snags]
@@ -324,6 +325,7 @@ def display_results_as_json(rectification: str, similar_snags: List[Dict[str, An
     }
 
     return results
+
 
 def test_retriever(db, query):
     """Test function to check if retriever is working"""
