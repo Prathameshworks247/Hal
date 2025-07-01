@@ -228,7 +228,7 @@ def display_results_as_json(rectification: str, similar_snags: List[Dict[str, An
             "average_similarity_percentage": (round(sum(s['similarity_score'] for s in similar_snags) / len(similar_snags), 2))*100 if similar_snags else 0,
             "highest_similarity_percentage": (similar_snags[0]['similarity_score'])*100 if similar_snags else 0,
             "lowest_similarity_percentage": (similar_snags[-1]['similarity_score'])*100 if similar_snags else 0,
-            "recommendation_reliability": "high" if len(similar_snags) >= 3 and (similar_snags[0]['similarity_percentage'] > 75) else "medium" if len(similar_snags) >= 2 else "low"
+            "recommendation_reliability": "high" if len(similar_snags) >= 3 and ((similar_snags[0]['similarity_score'])*100 > 75) else "medium" if len(similar_snags) >= 2 else "low"
         }
     }
     
