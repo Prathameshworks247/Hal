@@ -260,24 +260,32 @@ def extract_rectification_and_analytics(response_text: str) -> Dict[str, Any]:
 
     # Extract analytics JSON block with improved regex and error handling
     analytics_patterns = [
-        r"Analytics.*?:\s*(\[[\s\S]*?\])",  # More flexible pattern
-        r"\[[\s]*\{[\s\S]*?"title"[\s\S]*?\}[\s]*\]",  # Direct JSON pattern
+        r"Analytics.*?:\s*(\[[\s\S]*?\](?:\s*$|\s*\n))",  # Capture to end of line/text
+        r"(\[(?:[^[\]]*|\[[^\]]*\])*\])",  # Balanced bracket matching for JSON arrays
+        r"\[[\s\S]*?\"title\"[\s\S]*?\]",  # Direct pattern looking for title key
+        r"Analytics[^[]*(\[[^]]*(?:\{[^}]*\"title\"[^}]*\}[^]]*)*\])",  # More specific JSON structure
     ]
     
     analytics_json_str = None
-    for pattern in analytics_patterns:
+    for i, pattern in enumerate(analytics_patterns):
         analytics_match = re.search(pattern, response_text, re.DOTALL | re.IGNORECASE)
         if analytics_match:
-            if pattern == analytics_patterns[0]:
+            if i in [0, 3]:  # Patterns with capture groups
                 analytics_json_str = analytics_match.group(1)
-            else:
+            else:  # Patterns without capture groups
                 analytics_json_str = analytics_match.group(0)
+            print(f"✅ Analytics found using pattern {i+1}")
             break
     
     if analytics_json_str:
         try:
             # Clean up the JSON string
             analytics_json_str = analytics_json_str.strip()
+            
+            # Additional cleaning steps
+            analytics_json_str = clean_json_string(analytics_json_str)
+            
+            print(f"🔍 Attempting to parse JSON: {analytics_json_str[:200]}...")
             
             # Try to parse JSON
             parsed_analytics = json.loads(analytics_json_str)
@@ -292,6 +300,7 @@ def extract_rectification_and_analytics(response_text: str) -> Dict[str, Any]:
                         print(f"⚠️ Invalid analytics item structure: {item}")
                 
                 result["analytics"] = valid_analytics
+                print(f"✅ Successfully parsed {len(valid_analytics)} analytics items")
             else:
                 print("⚠️ Analytics is not a list format")
                 
@@ -299,13 +308,81 @@ def extract_rectification_and_analytics(response_text: str) -> Dict[str, Any]:
             print(f"⚠️ JSON decoding failed: {e}")
             print(f"Raw analytics string: {analytics_json_str}")
             
-            # Fallback: try to create default analytics
-            result["analytics"] = create_default_analytics()
+            # Try alternative parsing methods
+            result["analytics"] = try_alternative_json_parsing(analytics_json_str)
     else:
-        print("⚠️ No analytics section found.")
+        print("⚠️ No analytics section found in response")
         result["analytics"] = create_default_analytics()
 
     return result
+
+
+def clean_json_string(json_str: str) -> str:
+    """Clean and normalize JSON string"""
+    # Remove any leading/trailing whitespace
+    json_str = json_str.strip()
+    
+    # Remove any markdown code block markers
+    json_str = re.sub(r'^```(?:json)?\s*', '', json_str, flags=re.MULTILINE)
+    json_str = re.sub(r'\s*```
+    """Create default analytics when parsing fails"""
+    return [
+        {
+            "title": "Analysis Status",
+            "graph_type": "table",
+            "graph_data": {
+                "headers": ["Status", "Message"],
+                "rows": [["Analytics", "Not available for this query"]]
+            }
+        }
+    ], '', json_str, flags=re.MULTILINE)
+    
+    # Fix common JSON issues
+    # Replace single quotes with double quotes (but be careful with nested quotes)
+    json_str = re.sub(r"'([^']*)':", r'"\1":', json_str)  # Fix keys
+    json_str = re.sub(r":\s*'([^']*)'", r': "\1"', json_str)  # Fix string values
+    
+    # Ensure proper spacing around brackets and braces
+    json_str = re.sub(r'\s*\[\s*', '[', json_str)
+    json_str = re.sub(r'\s*\]\s*', ']', json_str)
+    
+    return json_str
+
+
+def try_alternative_json_parsing(json_str: str) -> List[Dict[str, Any]]:
+    """Try alternative methods to parse malformed JSON"""
+    try:
+        # Method 1: Try to extract individual JSON objects
+        objects = re.findall(r'\{[^{}]*"title"[^{}]*\}', json_str, re.DOTALL)
+        if objects:
+            parsed_objects = []
+            for obj_str in objects:
+                try:
+                    obj = json.loads(obj_str)
+                    if all(key in obj for key in ["title", "graph_type", "graph_data"]):
+                        parsed_objects.append(obj)
+                except json.JSONDecodeError:
+                    continue
+            
+            if parsed_objects:
+                print(f"✅ Recovered {len(parsed_objects)} objects using alternative parsing")
+                return parsed_objects
+        
+        # Method 2: Try with ast.literal_eval for Python-like syntax
+        import ast
+        try:
+            # Replace common JSON incompatibilities
+            python_str = json_str.replace('true', 'True').replace('false', 'False').replace('null', 'None')
+            parsed = ast.literal_eval(python_str)
+            if isinstance(parsed, list):
+                return parsed
+        except (ValueError, SyntaxError):
+            pass
+            
+    except Exception as e:
+        print(f"Alternative parsing failed: {e}")
+    
+    return create_default_analytics()
 
 
 def create_default_analytics() -> List[Dict[str, Any]]:
