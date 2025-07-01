@@ -86,10 +86,11 @@ def get_chain():
         6. atleast 6 different analytics with graph data [pie, bar, line,.. etc]
 
         ---
-        Recommended Rectification:
+        FORMAT(DO NOT CHANGE ANYTHING):
+        
+        Rectification:
         [Provide your detailed rectification steps here]
 
-        ---
         Analytics :
         [
         {{
