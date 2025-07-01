@@ -293,8 +293,12 @@ def excel_to_documents(file_path: str) -> list[Document]:
         )
     return documents
 
-
-    return documents
+def excel_columns(filepath):
+    df = pd.read_excel(filepath)
+    cols = df.columns
+    lis_cols = cols.to_list()
+    return lis_cols
+    
 
 class FlightHours(BaseModel):
     lower: int
@@ -443,4 +447,5 @@ async def excel_upload(file: UploadFile = File(...)):
     file_location = os.path.join(UPLOAD_DIR, file.filename)
     with open(file_location,"wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
-    return {"message": "File uploaded successfully", "filename": file.filename}
+    print("File Uploaded!")
+    return excel_columns(file_location)

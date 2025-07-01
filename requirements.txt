@@ -23,6 +23,4 @@ python-dotenv
 # If using Google GenAI (optional, but you imported it earlier)
 langchain-google-genai
 pandas
-json
-shutil
 python-multipart
