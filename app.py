@@ -1,5 +1,5 @@
 # app.py
-import datetime
+from datetime import datetime
 import os
 import logging
 from collections import defaultdict
@@ -243,19 +243,17 @@ def process_snag_query_json(chain, db, query: str) -> Dict[str, Any]:
             }
         }
 
-import re
-import json
-from typing import Dict, Any
+
 
 def extract_rectification_and_analytics(response_text: str) -> Dict[str, Any]:
     """
     Extracts the rectification recommendation and analytics JSON from an LLM response.
     Expected format:
     ---  
-    Recommended Rectification:
+    Rectification:
     <rectification text>
     ---  
-    Analytics (Graph Format):
+    Analytics:
     <list of JSON objects>
     """
     result = {
@@ -265,7 +263,7 @@ def extract_rectification_and_analytics(response_text: str) -> Dict[str, Any]:
 
     # Extract rectification block
     rect_match = re.search(
-        r"Recommended Rectification:\s*(.*?)\n\s*---", 
+        r"Rectification:\s*(.*?)\n\s*---", 
         response_text, 
         re.DOTALL | re.IGNORECASE
     )
@@ -274,9 +272,9 @@ def extract_rectification_and_analytics(response_text: str) -> Dict[str, Any]:
     else:
         print("⚠️ No rectification section found.")
 
-    # Extract analytics JSON block
+    # Extract analytics JSON block (more robust)
     analytics_match = re.search(
-        r"Analytics.*?:\s*(\[\s*{.*?}\s*\])", 
+        r"Analytics\s*:\s*(\[\s*[\s\S]*?\])", 
         response_text, 
         re.DOTALL | re.IGNORECASE
     )
@@ -291,15 +289,16 @@ def extract_rectification_and_analytics(response_text: str) -> Dict[str, Any]:
 
     return result
 
+from typing import List, Dict, Any
+
 def display_results_as_json(rectification: str, similar_snags: List[Dict[str, Any]], query: str) -> Dict[str, Any]:
     """Format and display results as JSON"""
     parsed = extract_rectification_and_analytics(rectification)
 
-    # Safety: avoid division by zero
-    avg_similarity = (
-        sum(s['similarity_score'] for s in similar_snags) / len(similar_snags)
-        if similar_snags else 0
-    )
+    num_snags = len(similar_snags)
+    similarity_scores = [s['similarity_score'] for s in similar_snags]
+
+    avg_similarity = sum(similarity_scores) / num_snags if num_snags else 0
 
     results = {
         "timestamp": datetime.now().isoformat(),
@@ -307,17 +306,17 @@ def display_results_as_json(rectification: str, similar_snags: List[Dict[str, An
         "status": "success",
         "rectification": {
             "ai_recommendation": parsed["rectification"],
-            "based_on_historical_cases": len(similar_snags)
+            "based_on_historical_cases": num_snags
         },
         "similar_historical_snags": similar_snags,
         "analytics": {
-            "total_similar_cases_found": len(similar_snags),
+            "total_similar_cases_found": num_snags,
             "average_similarity_percentage": round(avg_similarity * 100, 2),
-            "highest_similarity_percentage": round(similar_snags[0]['similarity_score'] * 100, 2) if similar_snags else 0,
-            "lowest_similarity_percentage": round(similar_snags[-1]['similarity_score'] * 100, 2) if similar_snags else 0,
+            "highest_similarity_percentage": round(max(similarity_scores) * 100, 2) if num_snags else 0,
+            "lowest_similarity_percentage": round(min(similarity_scores) * 100, 2) if num_snags else 0,
             "recommendation_reliability": (
-                "high" if len(similar_snags) >= 3 and similar_snags[0]['similarity_score'] * 100 > 75
-                else "medium" if len(similar_snags) >= 2
+                "high" if num_snags >= 3 and similarity_scores[0] * 100 > 75
+                else "medium" if num_snags >= 2
                 else "low"
             ),
             "charts": parsed["analytics"]
