@@ -24,3 +24,5 @@ python-dotenv
 langchain-google-genai
 pandas
 json
+shutil
+python-multipart

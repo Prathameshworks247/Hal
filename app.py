@@ -4,7 +4,7 @@ import logging
 from collections import defaultdict
 from fastapi.responses import JSONResponse
 import pandas as pd
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, List, Tuple, Any, Optional
@@ -14,8 +14,11 @@ from langchain.chains import RetrievalQA
 from langchain_core.prompts import PromptTemplate
 from langchain.docstore.document import Document
 from collections import defaultdict
+from langchain.schema import Document  # Or adjust based on your actual import
 from llm import get_llm
+import numpy as np
 import json
+import shutil
 
 app = FastAPI()
 app.add_middleware(
@@ -26,6 +29,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+UPLOAD_DIR  = "uploaded_excels"
+os.makedirs(UPLOAD_DIR, exist_ok=True)  
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -34,8 +39,8 @@ def get_chain():
         logger.info("Initializing embeddings model...")
         model_path = "./all-MiniLM-L6-v2"
         if not os.path.exists(model_path):
-            logger.warning(f"Local model path {model_path} not found. Using HuggingFace model name instead.")
-            model_path = "sentence-transformers/all-MiniLM-L6-v2"
+            logger.warning(f"Local model path {model_path} not found.")
+            return
         
         embeddings = HuggingFaceEmbeddings(
             model_name=model_path,
@@ -143,6 +148,15 @@ def get_similar_snags_with_metadata(db, query: str, k: int = 5) -> List[Dict[str
     except Exception as e:
         logger.error(f"Error retrieving similar snags: {str(e)}")
         return []
+    
+def convert_numpy(obj):
+    if isinstance(obj, dict):
+        return {k: convert_numpy(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy(i) for i in obj]
+    elif isinstance(obj, np.generic):
+        return obj.item()
+    return obj
 
 def process_snag_query_json(chain, db, query: str) -> Dict[str, Any]:
     """
@@ -262,16 +276,46 @@ def export_results_to_dict(rectification: str, similar_snags: List[Dict[str, Any
             'most_similar_score': similar_snags[0]['similarity_percentage'] if similar_snags else 0
         }
     }
+
+def excel_to_documents(file_path: str) -> list[Document]:
+    df = pd.read_excel(file_path)
+    documents = []
+
+    for idx, row in df.iterrows():
+        content_lines = [f"{col}: {row[col]}" for col in df.columns if pd.notna(row[col])]
+        content = "\n".join(content_lines)
+
+        documents.append(
+            Document(
+                page_content=content,
+                metadata={"row_index": idx, "source": "excel_row"}
+            )
+        )
+    return documents
+
+
+    return documents
+
+class FlightHours(BaseModel):
+    lower: int
+    upper: int
+
 class QueryRequest(BaseModel):
     query: str
     helicopter_type: Optional[str] = None
-    flight_hours: Optional[str] = None
+    flight_hours: Optional[FlightHours] = None
     event_type: Optional[str] = None
     status: Optional[str] = None
     raised_by: Optional[str] = None
 
+
+class QueryRequestFile(BaseModel):
+    query: str
+    file_name: str
+
+
 @app.post("/rectify")
-async def rectification(request: QueryRequest) -> Dict[str, Any]:
+async def rectification(request: QueryRequest) -> Dict[Any, Any]:
     try:
         print("🚁 Aircraft Snag Resolution System - JSON Output")
         print("=" * 50)
@@ -284,7 +328,7 @@ async def rectification(request: QueryRequest) -> Dict[str, Any]:
         parts = [
             f"Query: {request.query}",
             f"Helicopter Type: {request.helicopter_type}" if request.helicopter_type else "",
-            f"Flight Hours: {request.flight_hours}" if request.flight_hours else "",
+            f"Flight Hours: {request.flight_hours.lower} to {request.flight_hours.upper}" if request.flight_hours else "",
             f"Event Type: {request.event_type}" if request.event_type else "",
             f"Status: {request.status}" if request.status else "",
             f"Raised By: {request.raised_by}" if request.raised_by else "",
@@ -295,11 +339,82 @@ async def rectification(request: QueryRequest) -> Dict[str, Any]:
 
         json_results = process_snag_query_json(chain, db, final_query)
 
-        return json_results
+        return convert_numpy(json_results)
 
     except Exception as e:
         return {"error": str(e)}
-    
+
+@app.post("/rectify-file")
+async def rectification(request: QueryRequestFile) -> Dict[Any, Any]:
+    try:
+        parts = [
+            f"Query: {request.query}",
+            f"Helicopter Type: {request.helicopter_type}" if request.helicopter_type else "",
+            f"Flight Hours: {request.flight_hours.lower} to {request.flight_hours.upper}" if request.flight_hours else "",
+            f"Event Type: {request.event_type}" if request.event_type else "",
+            f"Status: {request.status}" if request.status else "",
+            f"Raised By: {request.raised_by}" if request.raised_by else "",
+        ]
+        final_query = "\n".join([part for part in parts if part.strip()])  
+        file_location = os.path.join(UPLOAD_DIR, request.file_name)
+        docs = excel_to_documents(file_location)
+        if not docs:
+            return {"error": "No relevant historical snag records found."}
+
+        embeddings = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            model_kwargs={"device": "cpu"}
+        )
+
+        prompt = PromptTemplate.from_template("""
+        You are an expert aircraft technician with extensive experience in aircraft maintenance and troubleshooting.
+        
+        Based on the following historical snag records and their rectifications, provide a detailed recommendation for fixing the current snag.
+        
+        Current Snag: {question}
+        
+        Historical Snag Records:
+        {context}
+        
+        Please provide:
+        1. Most likely cause of the issue
+        2. Step-by-step rectification procedure
+        3. Any safety precautions to consider
+        4. Parts that might need replacement
+        5. Expected time to complete the fix
+        
+        Recommended Rectification:
+        """)
+
+        vectorstore = FAISS.from_documents(
+            docs,
+            embedding=embeddings,
+        )
+
+        retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 5})
+
+        logger.info("Getting LLM instance...")
+        llm = get_llm()
+        logger.info("LLM instance obtained successfully.")
+
+        qa_chain = RetrievalQA.from_chain_type(
+            llm=llm,
+            chain_type="stuff",
+            retriever=retriever,
+            chain_type_kwargs={"prompt": prompt, "verbose": True},
+            return_source_documents=True,
+            input_key="question",
+            output_key="result"
+        )
+        json_results = process_snag_query_json(qa_chain, vectorstore, final_query)
+
+        return convert_numpy(json_results)
+
+    except Exception as e:
+        logger.exception("Error during rectification")
+        return {"error": str(e)}
+
+
     
 @app.post("/unique-columns", response_model=Dict[str, List[str]])
 def get_all_unique_column_values():
@@ -320,3 +435,12 @@ def get_all_unique_column_values():
             dic[key] = value
 
     return JSONResponse(content=dic)
+
+@app.post("/excel-upload")
+async def excel_upload(file: UploadFile = File(...)):
+    if not file.filename.endswith(('.xlsx','.xls')):
+        return JSONResponse(status_code=400, content={"error": "Only .xlsx or .xls files are allowed."})
+    file_location = os.path.join(UPLOAD_DIR, file.filename)
+    with open(file_location,"wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    return {"message": "File uploaded successfully", "filename": file.filename}
