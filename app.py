@@ -220,15 +220,14 @@ def display_results_as_json(rectification: str, similar_snags: List[Dict[str, An
         "status": "success",
         "rectification": {
             "ai_recommendation": rectification,
-            "confidence": "high" if similar_snags and similar_snags[0]['similarity_percentage'] > 80 else "medium" if similar_snags and similar_snags[0]['similarity_percentage'] > 60 else "low",
             "based_on_historical_cases": len(similar_snags)
         },
         "similar_historical_snags": similar_snags,
         "summary": {
             "total_similar_cases_found": len(similar_snags),
-            "average_similarity_percentage": round(sum(s['similarity_percentage'] for s in similar_snags) / len(similar_snags), 2) if similar_snags else 0,
-            "highest_similarity_percentage": similar_snags[0]['similarity_percentage'] if similar_snags else 0,
-            "lowest_similarity_percentage": similar_snags[-1]['similarity_percentage'] if similar_snags else 0,
+            "average_similarity_percentage": (round(sum(s['similarity_score'] for s in similar_snags) / len(similar_snags), 2))*100 if similar_snags else 0,
+            "highest_similarity_percentage": (similar_snags[0]['similarity_score'])*100 if similar_snags else 0,
+            "lowest_similarity_percentage": (similar_snags[-1]['similarity_score'])*100 if similar_snags else 0,
             "recommendation_reliability": "high" if len(similar_snags) >= 3 and (similar_snags[0]['similarity_percentage'] > 75) else "medium" if len(similar_snags) >= 2 else "low"
         }
     }
