@@ -83,31 +83,31 @@ def get_chain():
         3. Any safety precautions to consider
         4. Parts that might need replacement
         5. Expected time to complete the fix
-        6. atleast 6 different analytics
+        6. atleast 6 different analytics with graph data [pie, bar, line,.. etc]
 
         ---
         Recommended Rectification:
         [Provide your detailed rectification steps here]
 
         ---
-        Analytics (Graph Format):
+        Analytics :
         [
-        {
+        {{
             "title": "Frequent Snag Types",
             "graph_type": "pie",
-            "graph_data": {
+            "graph_data": {{
             "labels": ["Hydraulic", "Electrical", "Mechanical", "Others"],
             "values": [40, 30, 20, 10]
-            }
-        },
-        {
+            }}
+        }},
+        {{
             "title": "Resolution Time Analysis",
             "graph_type": "bar",
-            "graph_data": {
+            "graph_data": {{
             "labels": ["Quick Fix", "Medium", "Complex"],
             "values": [25, 45, 30]
-            }
-        }
+            }}
+        }}
         ]
         
  
@@ -244,15 +244,24 @@ def process_snag_query_json(chain, db, query: str) -> Dict[str, Any]:
 
 def display_results_as_json(rectification: str, similar_snags: List[Dict[str, Any]], query: str) -> Dict[str, Any]:
     """Format and display results as JSON"""
-    import json
     from datetime import datetime
-    
+    rect_text = rectification
+    analytics_data = {}
+
+    match = re.search(r"Analytics\s*:?[\n\r]*(\[.*\])", rectification, re.DOTALL)
+    if match:
+        analytics_json_str = match.group(1)
+        rect_text = rectification[:match.start()].strip()  # Everything before Analytics
+        try:
+            analytics_data = json.loads(analytics_json_str)
+        except json.JSONDecodeError as e:
+            analytics_data = {"error": f"Invalid JSON in analytics section: {str(e)}"}
     results = {
         "timestamp": datetime.now().isoformat(),
         "query": query,
         "status": "success",
         "rectification": {
-            "ai_recommendation": rectification,
+            "ai_recommendation": rect_text,
             "based_on_historical_cases": len(similar_snags)
         },
         "similar_historical_snags": similar_snags,
@@ -262,7 +271,7 @@ def display_results_as_json(rectification: str, similar_snags: List[Dict[str, An
             "highest_similarity_percentage": (similar_snags[0]['similarity_score'])*100 if similar_snags else 0,
             "lowest_similarity_percentage": (similar_snags[-1]['similarity_score'])*100 if similar_snags else 0,
             "recommendation_reliability": "high" if len(similar_snags) >= 3 and ((similar_snags[0]['similarity_score'])*100 > 75) else "medium" if len(similar_snags) >= 2 else "low",
-            "charts": {}
+            "analytics": analytics_data
         }
     }
     
