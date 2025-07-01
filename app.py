@@ -69,17 +69,7 @@ def get_chain():
         
         prompt = PromptTemplate.from_template("""
         You are an expert aircraft technician with extensive experience in aircraft maintenance and troubleshooting.
-<<<<<<< HEAD
 
-        Based on the following historical snag records and their rectifications, provide a detailed recommendation for fixing the current snag.
-
-        Current Snag: {question}
-
-        Historical Snag Records:
-        {context}
-
-=======
-        
         Based on the following historical snag records and their rectifications, provide a detailed recommendation for fixing the current snag.
         
         Current Snag: {question}
@@ -87,14 +77,13 @@ def get_chain():
         Historical Snag Records:
         {context}
         
->>>>>>> parent of 73921b2 (major change analytics added)
         Please provide:
         1. Most likely cause of the issue
         2. Step-by-step rectification procedure
         3. Any safety precautions to consider
         4. Parts that might need replacement
         5. Expected time to complete the fix
-<<<<<<< HEAD
+        6. atleast 6 different analytics
 
         ---
         Recommended Rectification:
@@ -120,10 +109,8 @@ def get_chain():
             }
         }
         ]
-=======
         
  
->>>>>>> parent of 73921b2 (major change analytics adde
         IMPORTANT: The Analytics section must be valid JSON format with proper quotes and structure.
         """)
         logger.info("Getting LLM instance...")
