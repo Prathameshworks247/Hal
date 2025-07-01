@@ -324,7 +324,7 @@ def clean_json_string(json_str: str) -> str:
     
     # Remove any markdown code block markers
     json_str = re.sub(r'^```(?:json)?\s*', '', json_str, flags=re.MULTILINE)
-    json_str = re.sub(r'\s*```
+    json_str = re.sub(r'\s*```\s*$', '', json_str, flags=re.MULTILINE)
     """Create default analytics when parsing fails"""
     return [
         {
@@ -335,7 +335,7 @@ def clean_json_string(json_str: str) -> str:
                 "rows": [["Analytics", "Not available for this query"]]
             }
         }
-    ], '', json_str, flags=re.MULTILINE)
+    ]
     
     # Fix common JSON issues
     # Replace single quotes with double quotes (but be careful with nested quotes)
