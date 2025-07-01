@@ -228,7 +228,7 @@ def display_results_as_json(rectification: str, similar_snags: List[Dict[str, An
             "based_on_historical_cases": len(similar_snags)
         },
         "similar_historical_snags": similar_snags,
-        "Analytics": {
+        "analytics": {
             "total_similar_cases_found": len(similar_snags),
             "average_similarity_percentage": (round(sum(s['similarity_score'] for s in similar_snags) / len(similar_snags), 2))*100 if similar_snags else 0,
             "highest_similarity_percentage": (similar_snags[0]['similarity_score'])*100 if similar_snags else 0,
