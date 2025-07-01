@@ -66,6 +66,7 @@ def get_chain():
         retriever = db.as_retriever(search_type="similarity", search_kwargs={"k": 5}) 
         logger.info("Retriever configured successfully.")
 
+        
         prompt = PromptTemplate.from_template("""
         You are an expert aircraft technician with extensive experience in aircraft maintenance and troubleshooting.
 
@@ -85,25 +86,30 @@ def get_chain():
 
         ---
         Recommended Rectification:
-        Provide a detailed explanation here.
+        [Provide your detailed rectification steps here]
 
         ---
         Analytics (Graph Format):
-        Return analytics as a list of JSON objects, each with:
-        - `title`: string (e.g., "Frequent Snag Types")
-        - `graph_type`: one of ["bar", "line", "pie", "table"]
-        - `graph_data`: an object structured for the selected graph type
-        Example:
         [
         {
             "title": "Frequent Snag Types",
             "graph_type": "pie",
             "graph_data": {
-            "labels": ["Hydraulic", "Seal", "Others"],
-            "values": [45, 35, 20]
+            "labels": ["Hydraulic", "Electrical", "Mechanical", "Others"],
+            "values": [40, 30, 20, 10]
+            }
+        },
+        {
+            "title": "Resolution Time Analysis",
+            "graph_type": "bar",
+            "graph_data": {
+            "labels": ["Quick Fix", "Medium", "Complex"],
+            "values": [25, 45, 30]
             }
         }
         ]
+
+        IMPORTANT: The Analytics section must be valid JSON format with proper quotes and structure.
         """)
         logger.info("Getting LLM instance...")
         llm = get_llm()
@@ -243,7 +249,7 @@ def extract_rectification_and_analytics(response_text: str) -> Dict[str, Any]:
 
     # Extract rectification block
     rect_match = re.search(
-        r"Recommended Rectification:\s*(.*?)\n\s*---", 
+        r"Recommended Rectification:\s*(.*?)(?:\n\s*---|\n\s*Analytics|$)", 
         response_text, 
         re.DOTALL | re.IGNORECASE
     )
@@ -252,23 +258,68 @@ def extract_rectification_and_analytics(response_text: str) -> Dict[str, Any]:
     else:
         print("⚠️ No rectification section found.")
 
-    # Extract analytics JSON block
-    analytics_match = re.search(
-        r"Analytics.*?:\s*(\[\s*{.*?}\s*\])", 
-        response_text, 
-        re.DOTALL | re.IGNORECASE
-    )
-    if analytics_match:
-        analytics_str = analytics_match.group(1)
+    # Extract analytics JSON block with improved regex and error handling
+    analytics_patterns = [
+        r"Analytics.*?:\s*(\[[\s\S]*?\])",  # More flexible pattern
+        r"\[[\s]*\{[\s\S]*?"title"[\s\S]*?\}[\s]*\]",  # Direct JSON pattern
+    ]
+    
+    analytics_json_str = None
+    for pattern in analytics_patterns:
+        analytics_match = re.search(pattern, response_text, re.DOTALL | re.IGNORECASE)
+        if analytics_match:
+            if pattern == analytics_patterns[0]:
+                analytics_json_str = analytics_match.group(1)
+            else:
+                analytics_json_str = analytics_match.group(0)
+            break
+    
+    if analytics_json_str:
         try:
-            result["analytics"] = json.loads(analytics_str)
+            # Clean up the JSON string
+            analytics_json_str = analytics_json_str.strip()
+            
+            # Try to parse JSON
+            parsed_analytics = json.loads(analytics_json_str)
+            
+            # Validate structure
+            if isinstance(parsed_analytics, list):
+                valid_analytics = []
+                for item in parsed_analytics:
+                    if isinstance(item, dict) and all(key in item for key in ["title", "graph_type", "graph_data"]):
+                        valid_analytics.append(item)
+                    else:
+                        print(f"⚠️ Invalid analytics item structure: {item}")
+                
+                result["analytics"] = valid_analytics
+            else:
+                print("⚠️ Analytics is not a list format")
+                
         except json.JSONDecodeError as e:
             print(f"⚠️ JSON decoding failed: {e}")
+            print(f"Raw analytics string: {analytics_json_str}")
+            
+            # Fallback: try to create default analytics
+            result["analytics"] = create_default_analytics()
     else:
         print("⚠️ No analytics section found.")
+        result["analytics"] = create_default_analytics()
 
     return result
 
+
+def create_default_analytics() -> List[Dict[str, Any]]:
+    """Create default analytics when parsing fails"""
+    return [
+        {
+            "title": "Analysis Status",
+            "graph_type": "table",
+            "graph_data": {
+                "headers": ["Status", "Message"],
+                "rows": [["Analytics", "Not available for this query"]]
+            }
+        }
+    ]
 
 def display_results_as_json(rectification: str, similar_snags: List[Dict[str, Any]], query: str) -> Dict[str, Any]:
     """Format and display results as JSON"""
