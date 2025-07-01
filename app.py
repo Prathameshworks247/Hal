@@ -15,7 +15,7 @@ from langchain.chains import RetrievalQA
 from langchain_core.prompts import PromptTemplate
 from langchain.docstore.document import Document
 from collections import defaultdict
-from langchain.schema import Document  # Or adjust based on your actual import
+from langchain.schema import Document 
 from llm import get_llm
 import numpy as np
 import json
@@ -67,38 +67,44 @@ def get_chain():
         logger.info("Retriever configured successfully.")
 
         prompt = PromptTemplate.from_template("""
-            You are an expert aircraft technician with extensive experience in aircraft maintenance and troubleshooting.
+        You are an expert aircraft technician with extensive experience in aircraft maintenance and troubleshooting.
 
-            Based on the following historical snag records and their rectifications, provide a detailed recommendation for fixing the current snag.
+        Based on the following historical snag records and their rectifications, provide a detailed recommendation for fixing the current snag.
 
-            Current Snag: {question}
+        Current Snag: {question}
 
-            Historical Snag Records:
-            {context}
+        Historical Snag Records:
+        {context}
 
-            Please provide:
-            1. Most likely cause of the issue
-            2. Step-by-step rectification procedure
-            3. Any safety precautions to consider
-            4. Parts that might need replacement
-            5. Expected time to complete the fix
+        Please provide:
+        1. Most likely cause of the issue
+        2. Step-by-step rectification procedure
+        3. Any safety precautions to consider
+        4. Parts that might need replacement
+        5. Expected time to complete the fix
 
-            ---
-            Recommended Rectification:
-            Provide a detailed explanation here.
+        ---
+        Recommended Rectification:
+        Provide a detailed explanation here.
 
-            ---
-            Analytics (Graph Format):
-            Return analytics based on similar previous snags as a **list of graph-ready JSON objects**, each with the following structure:
-
-            ```json
-            {
-            "title": "string",                 // Short label for the chart
-            "graph_type": "bar" | "line" | "pie" | "table",
-            "graph_data": object              // Data structure suitable for the chart
+        ---
+        Analytics (Graph Format):
+        Return analytics as a list of JSON objects, each with:
+        - `title`: string (e.g., "Frequent Snag Types")
+        - `graph_type`: one of ["bar", "line", "pie", "table"]
+        - `graph_data`: an object structured for the selected graph type
+        Example:
+        [
+        {
+            "title": "Frequent Snag Types",
+            "graph_type": "pie",
+            "graph_data": {
+            "labels": ["Hydraulic", "Seal", "Others"],
+            "values": [45, 35, 20]
             }
-            """)
-
+        }
+        ]
+        """)
         logger.info("Getting LLM instance...")
         llm = get_llm()
         logger.info("LLM instance obtained successfully.")
@@ -228,9 +234,6 @@ def process_snag_query_json(chain, db, query: str) -> Dict[str, Any]:
             }
         }
 
-import re
-import json
-from typing import Dict, Any
 
 def extract_rectification_and_analytics(response_text: str) -> Dict[str, Any]:
     result = {
