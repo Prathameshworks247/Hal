@@ -19,6 +19,7 @@ from langchain.schema import Document
 from llm import get_llm
 import numpy as np
 import json
+from functools import lru_cache
 import shutil
 import re
 
@@ -83,35 +84,11 @@ def get_chain():
         3. Any safety precautions to consider
         4. Parts that might need replacement
         5. Expected time to complete the fix
-        6. atleast 6 different analytics with graph data [pie, bar, line,.. etc]
         
-        FORMAT(DO NOT CHANGE ANYTHING):
         ---
         Rectification:
         [Provide your detailed rectification steps here]
-        ---
-        Analytics :
-        [
-        {{
-            "title": "Frequent Snag Types",
-            "graph_type": "pie",
-            "graph_data": {{
-            "labels": ["Hydraulic", "Electrical", "Mechanical", "Others"],
-            "values": [40, 30, 20, 10]
-            }}
-        }},
-        {{
-            "title": "Resolution Time Analysis",
-            "graph_type": "bar",
-            "graph_data": {{
-            "labels": ["Quick Fix", "Medium", "Complex"],
-            "values": [25, 45, 30]
-            }}
-        }}
-        ]
-        ---
- 
-        IMPORTANT: The Analytics section must be valid JSON format with proper quotes and structure.
+    
         """)
         logger.info("Getting LLM instance...")
         llm = get_llm()
@@ -138,8 +115,11 @@ def get_chain():
         logger.error(f"Error in get_chain(): {str(e)}")
         raise
 
-from typing import List, Dict, Any
-import logging
+
+@lru_cache()
+def get_chain_cached():
+    return get_chain()
+
 
 logger = logging.getLogger(__name__)
 
@@ -243,50 +223,48 @@ def process_snag_query_json(chain, db, query: str) -> Dict[str, Any]:
         }
 
 
-def extract_rectification_and_analytics(response_text: str) -> Dict[str, Any]:
-    import re
-    import json
+# def extract_rectification_and_analytics(response_text: str) -> Dict[str, Any]:
+#     import re
+#     import json
 
-    result = {
-        "rectification": "",
-        "analytics": []
-    }
+#     result = {
+#         "rectification": "",
+#         "analytics": []
+#     }
 
-    # Extract rectification
-    rect_match = re.search(
-        r"Rectification:\s*(.*?)\s*---", 
-        response_text, 
-        re.DOTALL | re.IGNORECASE
-    )
-    if rect_match:
-        result["rectification"] = rect_match.group(1).strip()
-    else:
-        print("⚠️ No rectification section found.")
+#     # Extract rectification
+#     rect_match = re.search(
+#         r"Rectification:\s*(.*?)\s*---", 
+#         response_text, 
+#         re.DOTALL | re.IGNORECASE
+#     )
+#     if rect_match:
+#         result["rectification"] = rect_match.group(1).strip()
+#     else:
+#         print("⚠️ No rectification section found.")
 
-    # Extract and fix analytics
-    analytics_match = re.search(
-        r"Analytics\s*:\s*(\[[\s\S]*?\])", 
-        response_text, 
-        re.DOTALL | re.IGNORECASE
-    )
-    if analytics_match:
-        analytics_str = analytics_match.group(1).strip()
-        analytics_str = analytics_str.replace("{{", "{").replace("}}", "}")  # ✅ FIX HERE
-        try:
-            result["analytics"] = json.loads(analytics_str)
-        except json.JSONDecodeError as e:
-            print(f"⚠️ JSON decoding failed: {e}")
-    else:
-        print("⚠️ No analytics section found.")
+#     # Extract and fix analytics
+#     analytics_match = re.search(
+#         r"Analytics\s*:\s*(\[[\s\S]*?\])", 
+#         response_text, 
+#         re.DOTALL | re.IGNORECASE
+#     )
+#     if analytics_match:
+#         analytics_str = analytics_match.group(1).strip()
+#         analytics_str = analytics_str.replace("{{", "{").replace("}}", "}")  # ✅ FIX HERE
+#         try:
+#             result["analytics"] = json.loads(analytics_str)
+#         except json.JSONDecodeError as e:
+#             print(f"⚠️ JSON decoding failed: {e}")
+#     else:
+#         print("⚠️ No analytics section found.")
 
-    return result
+#     return result
 
 
 
 def display_results_as_json(response_text: str, similar_snags: List[Dict[str, Any]], query: str) -> Dict[str, Any]:
     """Format and display results as structured JSON"""
-    parsed = extract_rectification_and_analytics(response_text)
-
     num_snags = len(similar_snags)
     similarity_scores = [s['similarity_score'] for s in similar_snags]
 
@@ -297,7 +275,7 @@ def display_results_as_json(response_text: str, similar_snags: List[Dict[str, An
         "query": query,
         "status": "success",
         "rectification": {
-            "ai_recommendation": parsed["rectification"],
+            "ai_recommendation": rectification,
             "based_on_historical_cases": num_snags
         },
         "similar_historical_snags": similar_snags,
@@ -311,7 +289,6 @@ def display_results_as_json(response_text: str, similar_snags: List[Dict[str, An
                 else "medium" if num_snags >= 2
                 else "low"
             ),
-            "charts": parsed["analytics"]
         }
     }
 
@@ -407,7 +384,7 @@ async def rectification(request: QueryRequest) -> Dict[Any, Any]:
         print("🚁 Aircraft Snag Resolution System - JSON Output")
         print("=" * 50)
 
-        chain, db = get_chain()
+        chain, db = get_chain_cached()
 
         if os.getenv("DEBUG_MODE") == "1":
             test_retriever(db, "hydraulic system pressure low")
@@ -526,4 +503,4 @@ async def excel_upload(file: UploadFile = File(...)):
     with open(file_location,"wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     print("File Uploaded!")
-    return excel_columns(file_location)
+    return excel_columns(file_location) 
