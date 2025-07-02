@@ -16,6 +16,7 @@ from langchain.docstore.document import Document
 from collections import defaultdict
 from langchain.schema import Document 
 from llm import get_llm
+from fastapi.encoders import jsonable_encoder
 import numpy as np
 from functools import lru_cache
 import json
@@ -84,38 +85,37 @@ Analyze the current snag using the matched historical records and return only st
 
 ✅ INSTRUCTIONS:
 - Create relevant **categories** for the pie chart based on snag types or themes.
-- Identify common **event types** (e.g., GR, PLT, Ground Observation) for Bar Chart 1.
-- Identify common **aircraft types** or codes (e.g., IA, J, ZD, etc.) for Bar Chart 2.
-- Estimate snag metrics (Complexity, Time, Tools, Risk, Frequency) using a 1–5 scale.
+- Identify common **event types** (e.g., GR, PLT, Ground Observation) and their no. of occurences in integer for Bar Chart 1.
+- Identify common **aircraft types** or codes (e.g., IA, J, ZD, etc.) and their no. of occurences in integer for Bar Chart 2.
+- Estimate snag metrics (Complexity, Time, Tools, Risk, Frequency) using a 1-5 scale.
 - Do not include explanations or commentary — just valid JSON.
 
 🎯 OUTPUT FORMAT:
 ```json
 {{
   "RadarChart": {{
-    "Complexity": 3,
-    "TimeNeeded": 2,
-    "ToolsRequired": 4,
-    "RiskLevel": 3,
-    "Frequency": 4
+    "Complexity": 1-5,
+    "TimeNeeded": 1-5,
+    "ToolsRequired": 1-5,
+    "RiskLevel": 1-5,
+    "Frequency": 1-5
   }},
-  "Similarity": 87,
   "PieChart": {{
-    "Hydraulic Issue": 3,
-    "Electrical Fault": 2,
-    "Cabin Pressure": 1
+    "Cat-1": 1-5,
+    "Cat-2": 1-5,
+    "Cat-3": 1-5
   }},
   "BarChart1": {{
-    "PLT": 12,
-    "GR": 9,
-    "Ground Observation": 5
+    "PLT": int,
+    "GR": int,
+    "Ground Observation": int
   }},
   "BarChart2": {{
-    "IA": 7,
-    "J": 4,
-    "ZD": 3,
-    "IN": 5,
-    "CG": 2
+    "IA": int,
+    "J": int,
+    "ZD": int,
+    "IN": int,
+    "CG": int
   }}
 }}
 
@@ -317,7 +317,7 @@ async def rectification(request: QueryRequest) -> Dict[Any, Any]:
 
         json_results = process_snag_query_json(chain, db, final_query)
 
-        return convert_numpy(json_results)
+        return jsonable_encoder((convert_numpy(json_results)))
 
     except Exception as e:
         return {"error": str(e)}
