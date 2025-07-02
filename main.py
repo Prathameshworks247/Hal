@@ -64,9 +64,12 @@ def get_chain():
 
         
         prompt = PromptTemplate.from_template('''
-                                              You are an expert aircraft technician and data analyst with extensive experience in aircraft maintenance and troubleshooting.
+You are an expert aircraft technician and data analyst with deep experience in helicopter maintenance and snag analysis.
 
-Based on the following historical snag records and their rectifications, analyze the current snag and return only structured analytics as per the format.
+Given the current snag and historical records, perform an analytical review by:
+1. Matching the current snag with similar historical records.
+2. Inferring common patterns and metrics.
+3. Creating dynamic analytics including categories and labels from the historical context.
 
 ---
 Current Snag:
@@ -77,46 +80,44 @@ Historical Snag Records:
 ---
 
 🔧 TASK:
-Analyze the current snag using the historical records and output only the following charts and stats in **strict JSON-like format** with no extra explanation or commentary.
+Analyze the current snag using the matched historical records and return only structured analytics in **valid JSON format**.
 
----
-📊 REQUIRED FORMAT:
-(Respond ONLY in this format. Do not add anything outside this block.)
+✅ INSTRUCTIONS:
+- Create relevant **categories** for the pie chart based on snag types or themes.
+- Identify common **event types** (e.g., GR, PLT, Ground Observation) for Bar Chart 1.
+- Identify common **aircraft types** or codes (e.g., IA, J, ZD, etc.) for Bar Chart 2.
+- Estimate snag metrics (Complexity, Time, Tools, Risk, Frequency) using a 1–5 scale.
+- Do not include explanations or commentary — just valid JSON.
 
----
-Radar Chart : {{
-    "Complexity": [1-5],
-    "Time Needed": [1-5],
-    "Tools Required": [1-5],
-    "Risk Level": [1-5],
-    "Frequency": [1-5]
+🎯 OUTPUT FORMAT:
+```json
+{{
+  "RadarChart": {{
+    "Complexity": 3,
+    "TimeNeeded": 2,
+    "ToolsRequired": 4,
+    "RiskLevel": 3,
+    "Frequency": 4
+  }},
+  "Similarity": 87,
+  "PieChart": {{
+    "Hydraulic Issue": 3,
+    "Electrical Fault": 2,
+    "Cabin Pressure": 1
+  }},
+  "BarChart1": {{
+    "PLT": 12,
+    "GR": 9,
+    "Ground Observation": 5
+  }},
+  "BarChart2": {{
+    "IA": 7,
+    "J": 4,
+    "ZD": 3,
+    "IN": 5,
+    "CG": 2
+  }}
 }}
----
-Similarity : [0-100]
----
-Pie Chart : {{
-    "category 1": [1-5],
-    "category 2": [1-5],
-    "category 3": [1-5]
-    // Add more categories if needed
-}}
----
-Bar Chart 1 : {{
-    "PLT": [integer],
-    "GR": [integer],
-    "Ground Observation": [integer]
-}}
----
-Bar Chart 2 : {{
-    "IA": [integer],
-    "J": [integer],
-    "ZD": [integer],
-    "IN": [integer],
-    "CG": [integer]
-}}
----
-
-🚫 Do NOT include any explanations, comments, or extra text. Return only the formatted blocks as shown above.
 
                                               ''')
         logger.info("Getting LLM instance...")

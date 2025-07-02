@@ -277,7 +277,7 @@ def display_results_as_json(response_text: str, similar_snags: List[Dict[str, An
         "query": query,
         "status": "success",
         "rectification": {
-            "ai_recommendation": rectification,
+            "ai_recommendation": response_text,
             "based_on_historical_cases": num_snags
         },
         "similar_historical_snags": similar_snags,
@@ -405,7 +405,7 @@ async def rectification(request: QueryRequest) -> Dict[Any, Any]:
 
         json_results = process_snag_query_json(chain, db, final_query)
 
-        return convert_numpy(json_results)
+        return jsonable_encoder(convert_numpy(json_results))
 
     except Exception as e:
         return {"error": str(e)}
@@ -469,7 +469,7 @@ async def rectification(request: QueryRequestFile) -> Dict[Any, Any]:
         )
         json_results = process_snag_query_json(qa_chain, vectorstore, final_query)
 
-        return jsonable_encoder(json_results)
+        return jsonable_encoder(convert_numpy(json_results))
 
 
     except Exception as e:
