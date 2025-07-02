@@ -264,7 +264,7 @@ def display_results_as_json(response_text: str, similar_snags: List[Dict[str, An
     similarity_scores = [s['similarity_score'] for s in similar_snags]
 
     avg_similarity = sum(similarity_scores) / num_snags if num_snags else 0
-
+    print(response_text)
     results = {
         "timestamp": datetime.now().isoformat(),
         "query": query,
