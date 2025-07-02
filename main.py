@@ -101,9 +101,9 @@ Analyze the current snag using the matched historical records and return only st
     "Frequency": 1-5
   }},
   "PieChart": {{
-    "Cat-1": 1-5,
-    "Cat-2": 1-5,
-    "Cat-3": 1-5
+    "Cat-1(insert your category)": 1-100,
+    "Cat-2(insert your category)": 1-100,
+    "Cat-3(insert your category)": 1-100
   }},
   "BarChart1": {{
     "PLT": int,
