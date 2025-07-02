@@ -315,9 +315,10 @@ async def rectification(request: QueryRequest) -> Dict[Any, Any]:
 
         print("🔍 Final LLM Query:\n", final_query)
 
-        json_results = process_snag_query_json(chain, db, final_query)
+        temp = process_snag_query_json(chain, db, final_query)
+        json_results = json.dumps(temp, indent=2)
 
-        return jsonable_encoder((convert_numpy(json_results)))
+        return convert_numpy(json_results)
 
     except Exception as e:
         return {"error": str(e)}
