@@ -5,7 +5,7 @@ response = requests.post(
     json={
         "query": "TR Vibrations",
         "helicopter_type": "",
-        "flight_hours": {"lower": 1200, "upper":2000},
+        "flight_hours": "",
         "event_type": "",
         "status": "",
         "raised_by": ""

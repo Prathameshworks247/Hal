@@ -19,6 +19,8 @@ from langchain.schema import Document
 from llm import get_llm
 import numpy as np
 import json
+from fastapi.encoders import jsonable_encoder
+
 from functools import lru_cache
 import shutil
 import re
@@ -467,7 +469,8 @@ async def rectification(request: QueryRequestFile) -> Dict[Any, Any]:
         )
         json_results = process_snag_query_json(qa_chain, vectorstore, final_query)
 
-        return convert_numpy(json_results)
+        return jsonable_encoder(json_results)
+
 
     except Exception as e:
         logger.exception("Error during rectification")
@@ -503,4 +506,4 @@ async def excel_upload(file: UploadFile = File(...)):
     with open(file_location,"wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     print("File Uploaded!")
-    return excel_columns(file_location) 
+    return excel_columns(file_location)
