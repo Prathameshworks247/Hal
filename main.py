@@ -59,7 +59,7 @@ def get_chain():
         )
         logger.info("FAISS index loaded successfully.")
 
-        retriever = db.as_retriever(search_type="similarity", search_kwargs={"k": 5}) 
+        retriever = db.as_retriever(search_type="similarity", search_kwargs={"k": 20}) 
         logger.info("Retriever configured successfully.")
 
         
@@ -189,6 +189,16 @@ def get_similar_snags_with_metadata(db, query: str, k: int = 5) -> List[Dict[str
         logger.error(f"Error retrieving similar snags: {str(e)}")
         return []
     
+def clean_llm_json_response(text: str) -> dict:
+    # Remove the leading ```json and trailing ```
+    cleaned = re.sub(r"^```json\s*|```$", "", text.strip(), flags=re.MULTILINE).strip()
+    
+    # Parse JSON
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON: {e}")
+
 def process_snag_query_json(chain, db, query: str) -> Dict[str, Any]:
     """
     Process snag query and return results in JSON format
@@ -271,7 +281,7 @@ def display_results_as_json(response_text: str, similar_snags: List[Dict[str, An
                 else "low"
             ), 
         },
-        "deep_analytics": response_text
+        "deep_analytics": clean_llm_json_response(response_text)
     }
 
     return results
