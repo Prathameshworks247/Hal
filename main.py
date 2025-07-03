@@ -96,7 +96,7 @@ Analyze the current snag using the matched historical records and return only st
 - Estimate snag metrics (Complexity, Time, Tools, Risk, Frequency) using a 1-5 scale.
 - Do not include explanations or commentary — just valid JSON.
 IMPORTANT: If the query is not related to helicopter snag descriptions, RETURN EXACTLY this JSON:
-{ "RadarChart": {}, "PieChart": {}, "BarChart1": {}, "BarChart2": {} }
+{{ "RadarChart": {{}}, "PieChart": {{}}, "BarChart1": {{}}, "BarChart2": {{}} }}
 
 Otherwise, return a valid JSON response in the format below.
 🎯 OUTPUT FORMAT:
