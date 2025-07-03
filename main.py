@@ -346,20 +346,21 @@ async def rectification(request: QueryRequest) -> Dict[Any, Any]:
         logger.info("✅ Retriever configured.")
 
         prompt = PromptTemplate.from_template("""
-            You are an expert aircraft technician and data analyst with deep experience in helicopter maintenance and snag analysis.
-            ---
-            Current Snag:
-            {question}
+                You are an expert aircraft technician and data analyst.
 
-            Historical Snag Records:
-            {context}
-            ---
-            Analyze the current snag using the matched historical records and return only if the snag is valid or not.
-            OUTPUT FORMAT:
-            "Yes"/"No"
-            
-            IMPORTANT: DO NOT GIVE ANY EXPLAINTION AT ALL, JUST YES OR NO
-        """)
+                Your task is to determine whether the following input is a valid aircraft snag description or just random or irrelevant text.
+
+                A valid aircraft snag will typically describe an issue or malfunction in aircraft components or systems, often in clear technical terms.
+
+                ---
+                Input:
+                {question}
+                ---
+
+                Answer with **only** one word: "Yes" if it is a valid snag description, or "No" if it is arbitrary or meaningless or inappropriate.
+
+                Respond with just: Yes or No.
+                """)
 
         logger.info(f"🔍 Final LLM Query:\n{final_query}")
 
