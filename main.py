@@ -21,16 +21,19 @@ import numpy as np
 from functools import lru_cache
 import json
 import shutil
+import ast
+
+
 import re
 
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=["*"]
 )
+@lru_cache()
+def get_chain_cached():
+    return get_chain()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 def get_chain():
@@ -146,9 +149,7 @@ Analyze the current snag using the matched historical records and return only st
         raise
     
 
-@lru_cache()
-def get_chain_cached():
-    return get_chain()
+
 
 def get_similar_snags_with_metadata(db, query: str, k: int = 5) -> List[Dict[str, Any]]:
     """
@@ -189,15 +190,14 @@ def get_similar_snags_with_metadata(db, query: str, k: int = 5) -> List[Dict[str
         logger.error(f"Error retrieving similar snags: {str(e)}")
         return []
     
-def clean_llm_json_response(text: str) -> dict:
-    # Remove the leading ```json and trailing ```
-    cleaned = re.sub(r"^```json\s*|```$", "", text.strip(), flags=re.MULTILINE).strip()
-    
-    # Parse JSON
+def clean_json_block(llm_response: str):
     try:
-        return json.loads(cleaned)
+        # Remove ```json and ``` if present
+        clean = re.sub(r"^```json\s*|\s*```$", "", llm_response.strip())
+        return json.loads(clean)
     except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON: {e}")
+        print("❌ JSON parsing failed:", e)
+        return {}
 
 def process_snag_query_json(chain, db, query: str) -> Dict[str, Any]:
     """
@@ -260,11 +260,17 @@ def convert_numpy(obj):
 
 def display_results_as_json(response_text: str, similar_snags: List[Dict[str, Any]], query: str) -> Dict[str, Any]:
     """Format and display results as structured JSON"""
+    print(response_text)
+
     num_snags = len(similar_snags)
     similarity_scores = [s['similarity_score'] for s in similar_snags]
-
     avg_similarity = sum(similarity_scores) / num_snags if num_snags else 0
-    print(response_text)
+    parsed = clean_json_block(response_text)
+    radar_chart = parsed.get("RadarChart", {})
+    pie_chart = parsed.get("PieChart", {})
+    bar_chart1 = parsed.get("BarChart1", {})
+    bar_chart2 = parsed.get("BarChart2", {})
+    
     results = {
         "timestamp": datetime.now().isoformat(),
         "query": query,
@@ -281,7 +287,10 @@ def display_results_as_json(response_text: str, similar_snags: List[Dict[str, An
                 else "low"
             ), 
         },
-        "deep_analytics": clean_llm_json_response(response_text)
+        "RadarChart": [{"category": key, "value": value} for key, value in radar_chart.items()],
+        "PieChart": [{"category": key, "value": value} for key, value in pie_chart.items()],
+        "BarChart1": [{"category": key, "value": value} for key, value in bar_chart1.items()],
+        "BarChart2": [{"category": key, "value": value} for key, value in bar_chart2.items()]
     }
 
     return results

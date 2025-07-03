@@ -13,5 +13,5 @@ response = requests.post(
 )
 
 print("Status Code:", response.status_code)
-print("Response JSON:", response.json())
+print(response.json())
 
