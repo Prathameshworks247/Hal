@@ -78,6 +78,8 @@ Given the current snag and historical records, perform an analytical review by:
 2. Inferring common patterns and metrics.
 3. Creating dynamic analytics including categories and labels from the historical context.
 
+
+ANSWER ONLY IF YOU FIND QUERY APPROPRIATE COMPARED TO THE SNAG DATA, ELSE RETURN EMPTY 
 ---
 Current Snag:
 {question}
