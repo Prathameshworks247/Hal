@@ -86,7 +86,7 @@ Historical Snag Records:
 🔧 TASK:
 Analyze the current snag using the matched historical records and return only structured analytics in **valid JSON format**.
 
-✅ INSTRUCTIONS:
+INSTRUCTIONS:
 - Create relevant **categories** for the pie chart based on snag types or themes.
 - Identify common **event types** (e.g., GR, PLT, Ground Observation) and their no. of occurences in integer for Bar Chart 1.
 - Identify common **aircraft types** or codes (e.g., IA, J, ZD, etc.) and their no. of occurences in integer for Bar Chart 2.
