@@ -34,9 +34,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-@lru_cache()
-def get_chain_cached():
-    return get_chain()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 def get_chain():
@@ -316,7 +313,7 @@ async def rectification(request: QueryRequest) -> Dict[Any, Any]:
         print("🚁 Aircraft Snag Resolution System - JSON Output")
         print("=" * 50)
 
-        chain, db = get_chain_cached()
+        chain, db = get_chain()
 
         final_query = request.query 
 
