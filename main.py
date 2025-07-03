@@ -357,6 +357,8 @@ async def rectification(request: QueryRequest) -> Dict[Any, Any]:
             Analyze the current snag using the matched historical records and return only if the snag is valid or not.
             OUTPUT FORMAT:
             "Yes"/"No"
+            
+            IMPORTANT: DO NOT GIVE ANY EXPLAINTION AT ALL, JUST YES OR NO
         """)
 
         logger.info(f"🔍 Final LLM Query:\n{final_query}")
