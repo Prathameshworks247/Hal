@@ -95,7 +95,8 @@ Analyze the current snag using the matched historical records and return only st
 - Identify common **aircraft types** or codes (e.g., IA, J, ZD, etc.) and their no. of occurences in integer for Bar Chart 2.
 - Estimate snag metrics (Complexity, Time, Tools, Risk, Frequency) using a 1-5 scale.
 - Do not include explanations or commentary — just valid JSON.
-IMPORTANT: If the query is not related to helicopter snag descriptions, RETURN EXACTLY this JSON:
+
+IMPORTANT: If the query is not related to the historical snag records, RETURN EXACTLY this JSON:
 {{ "RadarChart": {{}}, "PieChart": {{}}, "BarChart1": {{}}, "BarChart2": {{}} }}
 
 Otherwise, return a valid JSON response in the format below.
