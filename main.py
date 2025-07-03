@@ -314,71 +314,47 @@ async def rectification(request: QueryRequest) -> Dict[Any, Any]:
     except Exception as e:
         return {"error": str(e)}
     
+from langchain.chains import LLMChain
+
 @app.post("/verify")
-async def rectification(request: QueryRequest) -> Dict[Any, Any]:
+async def rectification(request: QueryRequest) -> Dict[str, Any]:
     try:
         final_query = request.query 
-        logger.info("🔍 Received query for rectification analysis.")
-
-        model_path = "./all-MiniLM-L6-v2"
-        if not os.path.exists(model_path):
-            logger.warning(f"Local model path {model_path} not found.")
-            return {"error": f"Local model path {model_path} not found."}
-
-        embeddings = HuggingFaceEmbeddings(
-            model_name=model_path,
-            model_kwargs={'device': 'cpu'} 
-        )
-        logger.info("✅ Embeddings model loaded successfully.")
-
-        faiss_index_path = "snag_faiss_index"
-        if not os.path.exists(faiss_index_path):
-            raise FileNotFoundError(f"FAISS index not found at {faiss_index_path}")
-        
-        db = FAISS.load_local(
-            faiss_index_path, 
-            embeddings=embeddings, 
-            allow_dangerous_deserialization=True
-        )
-        logger.info("✅ FAISS index loaded successfully.")
-
-        retriever = db.as_retriever(search_type="similarity", search_kwargs={"k": 20}) 
-        logger.info("✅ Retriever configured.")
+        logger.info("🔍 Received query for snag verification.")
 
         prompt = PromptTemplate.from_template("""
-                You are an expert aircraft technician and data analyst.
+        You are an expert aircraft technician and data analyst.
 
-                Your task is to determine whether the following input is a valid aircraft snag description or just random or irrelevant text.
+        Your task is to determine whether the following input is a valid aircraft snag description or just random or irrelevant text.
 
-                A valid aircraft snag will typically describe an issue or malfunction in aircraft components or systems, often in clear technical terms.
+        A valid aircraft snag will typically describe an issue or malfunction in aircraft components or systems, often in clear technical terms.
 
-                ---
-                Input:
-                {question}
-                ---
+        ---
+        Input:
+        {question}
+        ---
 
-                Answer with **only** one word: "Yes" if it is a valid snag description, or "No" if it is arbitrary or meaningless or inappropriate.
+        Answer with **only** one word: "Yes" if it is a valid snag description, or "No" if it is arbitrary or meaningless or inappropriate.
 
-                Respond with just: Yes or No.
-                """)
+        Respond with just: Yes or No.
+        """)
 
-        logger.info(f"🔍 Final LLM Query:\n{final_query}")
-
-        qa_chain = RetrievalQA.from_chain_type(
-            llm=get_llm(),
-            chain_type="stuff",
-            retriever=retriever,
-            chain_type_kwargs={
-                "prompt": prompt,
-                "verbose": True
-            },
-            return_source_documents=True,
-            input_key="question",
-            output_key="result"
+        llm_chain = LLMChain(
+            llm=get_llm(),  # e.g., ChatOpenAI(temperature=0.0)
+            prompt=prompt,
+            verbose=True
         )
 
-        response = qa_chain.invoke({"question": final_query})
-        return {"result": response.get('result', response.get('answer', str(response)))}
+        response = llm_chain.invoke({"question": final_query})
+        raw_result = response.get("text", "").strip().lower()
+
+        # Optional sanitization
+        if "yes" in raw_result:
+            return {"result": "Yes"}
+        elif "no" in raw_result:
+            return {"result": "No"}
+        else:
+            return {"result": "No", "note": "Model response not clearly yes/no. Defaulting to No."}
 
     except Exception as e:
         logger.error(f"❌ Error in rectification: {e}")
