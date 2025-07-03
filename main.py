@@ -156,17 +156,6 @@ Otherwise, return a valid JSON response in the format below.
 
 
 def get_similar_snags_with_metadata(db, query: str, k: int = 5) -> List[Dict[str, Any]]:
-    """
-    Retrieve similar snags with their metadata and similarity scores
-    
-    Args:
-        db: FAISS database instance
-        query: Current snag description
-        k: Number of similar documents to retrieve
-        
-    Returns:
-        List of dictionaries containing document content, metadata, and similarity scores
-    """
     try:
         # Get similar documents with scores
         docs_with_scores = db.similarity_search_with_score(query, k=k)
@@ -323,4 +312,71 @@ async def rectification(request: QueryRequest) -> Dict[Any, Any]:
         return convert_numpy(json_results)
 
     except Exception as e:
+        return {"error": str(e)}
+    
+@app.post("/verify")
+async def rectification(request: QueryRequest) -> Dict[Any, Any]:
+    try:
+        final_query = request.query 
+        logger.info("🔍 Received query for rectification analysis.")
+
+        model_path = "./all-MiniLM-L6-v2"
+        if not os.path.exists(model_path):
+            logger.warning(f"Local model path {model_path} not found.")
+            return {"error": f"Local model path {model_path} not found."}
+
+        embeddings = HuggingFaceEmbeddings(
+            model_name=model_path,
+            model_kwargs={'device': 'cpu'} 
+        )
+        logger.info("✅ Embeddings model loaded successfully.")
+
+        faiss_index_path = "snag_faiss_index"
+        if not os.path.exists(faiss_index_path):
+            raise FileNotFoundError(f"FAISS index not found at {faiss_index_path}")
+        
+        db = FAISS.load_local(
+            faiss_index_path, 
+            embeddings=embeddings, 
+            allow_dangerous_deserialization=True
+        )
+        logger.info("✅ FAISS index loaded successfully.")
+
+        retriever = db.as_retriever(search_type="similarity", search_kwargs={"k": 20}) 
+        logger.info("✅ Retriever configured.")
+
+        prompt = PromptTemplate.from_template("""
+            You are an expert aircraft technician and data analyst with deep experience in helicopter maintenance and snag analysis.
+            ---
+            Current Snag:
+            {question}
+
+            Historical Snag Records:
+            {context}
+            ---
+            Analyze the current snag using the matched historical records and return only if the snag is valid or not.
+            OUTPUT FORMAT:
+            "Yes"/"No"
+        """)
+
+        logger.info(f"🔍 Final LLM Query:\n{final_query}")
+
+        qa_chain = RetrievalQA.from_chain_type(
+            llm=get_llm(),
+            chain_type="stuff",
+            retriever=retriever,
+            chain_type_kwargs={
+                "prompt": prompt,
+                "verbose": True
+            },
+            return_source_documents=True,
+            input_key="question",
+            output_key="result"
+        )
+
+        response = qa_chain.invoke({"question": final_query})
+        return {"result": response.get('result', response.get('answer', str(response)))}
+
+    except Exception as e:
+        logger.error(f"❌ Error in rectification: {e}")
         return {"error": str(e)}
