@@ -98,9 +98,9 @@ Analyze the current snag using the matched historical records and return only st
 {{
   "RadarChart": {{
     "Complexity": 1-5,
-    "TimeNeeded": 1-5,
-    "ToolsRequired": 1-5,
-    "RiskLevel": 1-5,
+    "Time Needed": 1-5,
+    "Tools Required": 1-5,
+    "Risk Level": 1-5,
     "Frequency": 1-5
   }},
   "PieChart": {{
