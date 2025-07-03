@@ -318,16 +318,7 @@ async def rectification(request: QueryRequest) -> Dict[Any, Any]:
 
         chain, db = get_chain_cached()
 
-
-        parts = [
-            f"Query: {request.query}",
-            f"Helicopter Type: {request.helicopter_type}" if request.helicopter_type else "",
-            f"Flight Hours: {request.flight_hours}"  if request.flight_hours else "",
-            f"Event Type: {request.event_type}" if request.event_type else "",
-            f"Status: {request.status}" if request.status else "",
-            f"Raised By: {request.raised_by}" if request.raised_by else "",
-        ]
-        final_query = "\n".join([part for part in parts if part.strip()])  
+        final_query = request.query 
 
         print("🔍 Final LLM Query:\n", final_query)
 
