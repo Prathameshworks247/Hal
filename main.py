@@ -155,10 +155,16 @@ Otherwise, return a valid JSON response in the format below.
 
 
 
-def get_similar_snags_with_metadata(db, query: str, k: int = 5) -> List[Dict[str, Any]]:
+def get_similar_snags_with_metadata(db, query: str) -> List[Dict[str, Any]]:
     try:
         # Get similar documents with scores
-        docs_with_scores = db.similarity_search_with_score(query, k=k)
+        max_k = len(db.docstore._dict)
+
+        results = db.similarity_search_with_score(query, k=max_k)
+
+        docs_with_scores = [
+            (doc, score) for doc, score in results if score > 0.7
+        ]
 
         similar_snags = []
         for i, (doc, score) in enumerate(docs_with_scores):
@@ -217,7 +223,7 @@ def process_snag_query_json(chain, db, query: str) -> Dict[str, Any]:
             analytics = str(response)
         
         # Get similar snags with metadata
-        similar_snags = get_similar_snags_with_metadata(db, query, k=5)
+        similar_snags = get_similar_snags_with_metadata(db, query)
 
         # Format as JSON
         json_results = display_results_as_json(analytics, similar_snags, query)
@@ -340,7 +346,7 @@ async def rectification(request: QueryRequest) -> Dict[str, Any]:
         """)
 
         llm_chain = LLMChain(
-            llm=get_llm(),  # e.g., ChatOpenAI(temperature=0.0)
+            llm=get_llm(), 
             prompt=prompt,
             verbose=True
         )
