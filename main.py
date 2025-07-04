@@ -163,7 +163,7 @@ def get_similar_snags_with_metadata(db, query: str) -> List[Dict[str, Any]]:
         results = db.similarity_search_with_score(query, k=max_k)
 
         docs_with_scores = [
-            (doc, score) for doc, score in results if score > 0.7
+            (doc, score) for doc, score in results if score > 0.9
         ]
 
         similar_snags = []
