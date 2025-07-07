@@ -518,7 +518,8 @@ async def store_file(request: ExcelFileInput = Depends()):
                 content={"error": "Only .xlsx or .xls files are allowed."}
             )
 
-        file_name = f"{os.path.splitext(request.file.filename)[0]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}{os.path.splitext(request.file.filename)[1]}"
+        safe_colon = ":"
+        file_name = f"{os.path.splitext(request.file.filename)[0]}_{datetime.now().strftime(f'%Y{safe_colon}%m{safe_colon}%d_{safe_colon}%H{safe_colon}%M{safe_colon}%S')}{os.path.splitext(request.file.filename)[1]}"
         file_location = os.path.join(UPLOAD_DIR, file_name)
 
         with open(file_location, "wb") as buffer:
