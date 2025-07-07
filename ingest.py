@@ -35,7 +35,7 @@ STATUS: {row.get("STATUS","")}
     return docs
 
 def ingest():
-    docs = load_snag_excel("All_snags_data.xlsx")
+    docs = load_snag_excel("confidential_snag.xlsx")
     model_path = "./all-MiniLM-L6-v2"  
     embeddings = HuggingFaceEmbeddings(
         model_name=model_path)

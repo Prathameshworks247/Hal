@@ -5,7 +5,7 @@ import logging
 from collections import defaultdict
 from fastapi.responses import JSONResponse
 import pandas as pd
-from fastapi import FastAPI, Request, UploadFile, File
+from fastapi import FastAPI, Request, UploadFile, File,Form,Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, List, Tuple, Any, Optional
@@ -34,8 +34,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-UPLOAD_DIR  = "uploaded_excels"
-os.makedirs(UPLOAD_DIR, exist_ok=True)  
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -379,6 +377,15 @@ class QueryRequestFile(BaseModel):
     query: str
     file_name: str
 
+class ExcelFileInput:
+    def __init__(
+        self,
+        file: UploadFile = File(...),
+        pv_number: str = Form(...)
+    ):
+        self.file = file
+        self.pv_number = pv_number
+
 
 @app.post("/rectify")
 async def rectification(request: QueryRequest) -> Dict[Any, Any]:
@@ -478,32 +485,67 @@ async def rectification(request: QueryRequestFile) -> Dict[Any, Any]:
 
 
     
-@app.post("/unique-columns", response_model=Dict[str, List[str]])
-def get_all_unique_column_values():
-    df = pd.read_excel("All_snags_data.xlsx")
+@app.post("/get_unique_row", response_model=Dict[str, List[str]])
+def get_unique_row(pv_number: str = Form(...), filename:str = Form(...)):
+    try:
+        DIR = f"uploaded_excels/{pv_number}"
+        df = pd.read_excel(f"{DIR}/{filename}")
+        columns = list(df.columns)
+        temp = defaultdict(list)
+        dic = defaultdict(list)
+
+        for column in columns:
+            unique_vals = df[column].dropna().unique().tolist()
+            temp[column] = [str(v) if not isinstance(v, (str, int, float, bool)) else v for v in unique_vals]
+        for key, value in temp.items():
+            if len(value) < 100:
+                dic[key] = value
+        return JSONResponse(content=dic)
+
+    except Exception as e:
+        logger.exception("Error retrieving unique column values")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@app.post("/store_file")
+async def store_file(request: ExcelFileInput = Depends()):
+    try:
+        UPLOAD_DIR = f"uploaded_excels/{request.pv_number}"
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+        if not request.file.filename.endswith(('.xlsx', '.xls')):
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Only .xlsx or .xls files are allowed."}
+            )
+
+        file_name = f"{os.path.splitext(request.file.filename)[0]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}{os.path.splitext(request.file.filename)[1]}"
+        file_location = os.path.join(UPLOAD_DIR, file_name)
+
+        with open(file_location, "wb") as buffer:
+            shutil.copyfileobj(request.file.file, buffer)
+
+        print("File Uploaded:", file_location)
+        return excel_columns(file_location)
+    except Exception as e:
+        logger.exception("Error during sending file")
+        return {"error": str(e)}
     
-    df["HELI_TYPE"] = df["HELI_NO"].apply(lambda x: x[:2] if isinstance(x, str) and x[:2] in ["CG", "IA", "ZD", "IN", "J "] else None)
+@app.post("/send_file_names")
+async def send_file_names(pv_number: str = Form(...)):
+    try:
+        folder_path = os.path.join("uploaded_excels", pv_number)
 
-    columns = list(df.columns)
-    temp = defaultdict(list)
-    dic = defaultdict(list)
+        if not os.path.exists(folder_path):
+            return JSONResponse(status_code=404, content={"error": "Directory not found."})
 
-    for column in columns:
-        unique_vals = df[column].dropna().unique().tolist()
-        temp[column] = [str(v) if not isinstance(v, (str, int, float, bool)) else v for v in unique_vals]
+        # List only Excel files
+        excel_files = [
+            f for f in os.listdir(folder_path)
+            if f.endswith(('.xlsx', '.xls')) and os.path.isfile(os.path.join(folder_path, f))
+        ]
 
-    for key, value in temp.items():
-        if len(value) < 10:
-            dic[key] = value
-
-    return JSONResponse(content=dic)
-
-@app.post("/excel-upload")
-async def excel_upload(file: UploadFile = File(...)):
-    if not file.filename.endswith(('.xlsx','.xls')):
-        return JSONResponse(status_code=400, content={"error": "Only .xlsx or .xls files are allowed."})
-    file_location = os.path.join(UPLOAD_DIR, file.filename)
-    with open(file_location,"wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    print("File Uploaded!")
-    return excel_columns(file_location)
+        return {"files": excel_files}
+    
+    except Exception as e:
+        logger.exception("Error retrieving file names")
+        return JSONResponse(status_code=500, content={"error": str(e)})

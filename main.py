@@ -13,6 +13,7 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain.chains import RetrievalQA
 from langchain_core.prompts import PromptTemplate
 from langchain.docstore.document import Document
+from langchain.chains import LLMChain
 from collections import defaultdict
 from langchain.schema import Document 
 from llm import get_llm
@@ -248,6 +249,7 @@ def process_snag_query_json(chain, db, query: str) -> Dict[str, Any]:
                 "recommendation_reliability": "none"
             }
         }
+
 def convert_numpy(obj):
     if isinstance(obj, dict):
         return {k: convert_numpy(v) for k, v in obj.items()}
@@ -320,7 +322,6 @@ async def rectification(request: QueryRequest) -> Dict[Any, Any]:
     except Exception as e:
         return {"error": str(e)}
     
-from langchain.chains import LLMChain
 
 @app.post("/verify")
 async def rectification(request: QueryRequest) -> Dict[str, Any]:
