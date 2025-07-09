@@ -159,7 +159,9 @@ def get_unique_row(request: GetRows):
             unique_vals = df[column].dropna().unique().tolist()
             temp[column] = [str(v) if not isinstance(v, (str, int, float, bool)) else v for v in unique_vals]
         for key, value in temp.items():
-            if len(value) < 10:
+            if key.strip().lower() == "rectification":
+                continue
+            elif len(temp[key]) < 50:
                 dic[key] = value
             else:
                 dic[key] = []
