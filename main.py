@@ -16,7 +16,9 @@ from services.chain_service import get_analytics_chain
 from services.parsers import process_snag_query_json_analysis
 from utils.utils import convert_numpy
 from models.models import QueryRequest
-
+from models.models import QueryRequestFile
+from services.excel_service import excel_to_documents
+from services.chain_service import get_analytics_chain_from_xls
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
@@ -89,4 +91,22 @@ async def rectification(request: QueryRequest) -> Dict[str, Any]:
 
     except Exception as e:
         logger.error(f"❌ Error in rectification: {e}")
+        return {"error": str(e)}
+
+
+@app.post("/analyse-file")
+async def analyse_file(request: QueryRequestFile) -> Dict[Any, Any]:
+    try:
+        filename = request.file_name
+        pb_number = request.pb_number
+        final_query = request.query
+        chain, db = get_analytics_chain_from_xls(filename,pb_number)
+        # Get AI-generated rectification
+        print("🔍 Final LLM Query:\n", final_query)
+
+        json_results = process_snag_query_json_analysis(chain, db, final_query)
+       
+        return convert_numpy(json_results)
+    except Exception as e:
+        logger.exception("Error during rectification")
         return {"error": str(e)}

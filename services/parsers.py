@@ -1,9 +1,10 @@
-import logger
+import logging
 from typing import Dict,Any,List
 from services.similarity_service import get_similar_snags_with_metadata
 from datetime import datetime
 from services.similarity_service import get_similar_snags_analysis
 from utils.utils import  clean_json_block
+logger = logging.getLogger(__name__)
 
 def process_snag_query_json(chain, db, query: str) -> Dict[str, Any]:
     try:
@@ -52,7 +53,6 @@ def display_results_as_json(response_text: str, similar_snags: List[Dict[str, An
     results = {
         "timestamp": datetime.now().isoformat(),
         "query": query,
-        "status": "success",
         "rectification": {
             "ai_recommendation": response_text,
             "based_on_historical_cases": num_snags

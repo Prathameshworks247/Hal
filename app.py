@@ -159,14 +159,13 @@ def get_unique_row(request: GetRows):
             unique_vals = df[column].dropna().unique().tolist()
             temp[column] = [str(v) if not isinstance(v, (str, int, float, bool)) else v for v in unique_vals]
         for key, value in temp.items():
-            if key.strip().lower() == "rectification":
+            if key.strip().lower() == "rectification" or key.strip().lower() == "snag":
                 continue
             elif len(temp[key]) < 50:
                 dic[key] = value
             else:
                 dic[key] = []
         return JSONResponse(content=dic)
-
     except Exception as e:
         logger.exception("Error retrieving unique column values")
         return JSONResponse(status_code=500, content={"error": str(e)})
