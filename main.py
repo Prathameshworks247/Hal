@@ -29,84 +29,31 @@ app.add_middleware(
 )
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-    
+
 @app.post("/analytics")
-async def rectification(request: QueryRequest) -> Dict[Any, Any]:
-    try:
-        print("🚁 Aircraft Snag Resolution System - JSON Output")
-        print("=" * 50)
-
-        chain, db = get_analytics_chain()
-
-        final_query = request.query 
-
-        print("🔍 Final LLM Query:\n", final_query)
-
-        json_results = process_snag_query_json_analysis(chain, db, final_query)
-        return convert_numpy(json_results)
-
-    except Exception as e:
-        return {"error": str(e)}
-    
-
-@app.post("/verify")
-async def rectification(request: QueryRequest) -> Dict[str, Any]:
-    try:
-        final_query = request.query 
-        logger.info("🔍 Received query for snag verification.")
-
-        prompt = PromptTemplate.from_template("""
-        You are an expert aircraft technician and data analyst.
-
-        Your task is to determine whether the following input is a valid aircraft snag description or just random or irrelevant text.
-
-        A valid aircraft snag will typically describe an issue or malfunction in aircraft components or systems, often in clear technical terms.
-
-        ---
-        Input:
-        {question}
-        ---
-
-        Answer with **only** one word: "Yes" if it is a valid snag description, or "No" if it is arbitrary or meaningless or inappropriate.
-
-        Respond with just: Yes or No.
-        """)
-
-        llm_chain = LLMChain(
-            llm=get_llm(), 
-            prompt=prompt,
-            verbose=True
-        )
-
-        response = llm_chain.invoke({"question": final_query})
-        raw_result = response.get("text", "").strip().lower()
-
-        # Optional sanitization
-        if "yes" in raw_result:
-            return {"result": "Yes"}
-        elif "no" in raw_result:
-            return {"result": "No"}
-        else:
-            return {"result": "No", "note": "Model response not clearly yes/no. Defaulting to No."}
-
-    except Exception as e:
-        logger.error(f"❌ Error in rectification: {e}")
-        return {"error": str(e)}
-
-
-@app.post("/analyse-file")
-async def analyse_file(request: QueryRequestFile) -> Dict[Any, Any]:
+async def analyse(request: QueryRequestFile) -> Dict[Any, Any]:
     try:
         filename = request.file_name
         pb_number = request.pb_number
         final_query = request.query
-        chain, db = get_analytics_chain_from_xls(filename,pb_number)
+
+        if filename == "default":
+            print("🚁 Aircraft Snag Resolution System - JSON Output")
+            print("=" * 50)
+
+            chain, db = get_analytics_chain()
+
+            final_query = request.query 
+
+            print("🔍 Final LLM Query:\n", final_query)
+        else:
+            chain, db = get_analytics_chain_from_xls(filename,pb_number)
         # Get AI-generated rectification
         print("🔍 Final LLM Query:\n", final_query)
 
         json_results = process_snag_query_json_analysis(chain, db, final_query)
-       
         return convert_numpy(json_results)
+
     except Exception as e:
-        logger.exception("Error during rectification")
         return {"error": str(e)}
+

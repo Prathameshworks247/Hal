@@ -20,7 +20,7 @@ from fastapi.encoders import jsonable_encoder
 from functools import lru_cache
 import shutil
 from models.models import QueryRequest, ExcelFileInput,GetRows,NamesReq,QueryRequestFile
-from services.chain_service import get_chain
+from services.chain_service import get_chain, get_chain_file,verify
 from services.similarity_service import  get_similar_records_with_metadata
 from services.excel_service import excel_to_documents
 from services.parsers import process_snag_query_json, display_results_as_json
@@ -41,108 +41,76 @@ logger = logging.getLogger(__name__)
 @lru_cache()
 def get_chain_cached():
     return get_chain()
+def get_chain_file_chached(file_name, pb_number):
+    return get_chain_file(file_name, pb_number)
 
 
 @app.post("/rectify")
-async def rectification(request: QueryRequest) -> Dict[Any, Any]:
+async def rectification(request: QueryRequestFile) -> Dict[Any, Any]:
     try:
-        print("🚁 Aircraft Snag Resolution System - JSON Output")
-        print("=" * 50)
-
-        chain, db = get_chain_cached()
-
-        if os.getenv("DEBUG_MODE") == "1":
-            test_retriever(db, "hydraulic system pressure low")
-
-        final_query = request.query 
-
-        print("🔍 Final LLM Query:\n", final_query)
-
-        json_results = process_snag_query_json(chain, db, final_query)
-
-        return jsonable_encoder(convert_numpy(json_results))
-
-    except Exception as e:
-        return {"error": str(e)}
-
-@app.post("/rectify-file")
-async def rectify_file(request: QueryRequestFile) -> Dict[Any, Any]:
-    try:
-        parts = [
-            f"Query: {request.query}"
-        ]
-        UPLOAD_DIR = f"uploaded_excels/{request.pb_number}"
+        file_name = request.file_name
+        pb_number = request.pb_number
         final_query = request.query
-        file_location = os.path.join(UPLOAD_DIR, request.file_name)
-        docs = excel_to_documents(file_location)
-        if not docs:
-            return {"error": "No relevant historical snag records found."}
-        model_path = "./all-MiniLM-L6-v2"
-        embeddings = HuggingFaceEmbeddings(
-            model_name=model_path,
-            model_kwargs={"device": "cpu"}
-        )
+        verdict = verify(final_query)
+        print("The Query Is: ", verdict)
+        if not verdict:
+            return  {"error": "please enter a valid query"}
+        print("🚁 Aircraft Snag Resolution System - JSON Output")
+        if file_name == 'default':    
+            chain, db = get_chain_cached()
+            if os.getenv("DEBUG_MODE") == "1":
+                test_retriever(db, "hydraulic system pressure low")
 
-        prompt = PromptTemplate.from_template("""
-        You are an expert aircraft technician with extensive experience in aircraft maintenance and troubleshooting.
-        
-        Based on the following historical snag records and their rectifications, provide a detailed recommendation for fixing the current snag.
-        
-        Current Snag: {question}
-        
-        Historical Snag Records:
-        {context}
-        
-        Please provide:
-        1. Most likely cause of the issue
-        2. Step-by-step rectification procedure
-        3. Any safety precautions to consider
-        4. Parts that might need replacement
-        5. Expected time to complete the fix
-        
-        Recommended Rectification:
-        """)
+            print("🔍 Final LLM Query:\n", final_query)
 
-        vectorstore = FAISS.from_documents(
-            docs,
-            embedding=embeddings,
-        )
+            json_results = process_snag_query_json(chain, db, final_query)
 
-        retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 5})
+            return jsonable_encoder(convert_numpy(json_results))
 
-        logger.info("Getting LLM instance...")
-        llm = get_llm()
-        logger.info("LLM instance obtained successfully.")
-
-        qa_chain = RetrievalQA.from_chain_type(
-            llm=llm,
-            chain_type="stuff",
-            retriever=retriever,
-            chain_type_kwargs={"prompt": prompt, "verbose": True},
-            return_source_documents=True,
-            input_key="question",
-            output_key="result"
-        )
-        logger.info(f"Processing query: {final_query}")
-        
-        # Get AI-generated rectification
-        response = qa_chain.invoke({"question": final_query})
+        else:
+            chain, db = get_chain_file_chached(file_name, pb_number)
+            response = chain.invoke({"question": final_query})
 
         # Extract result
-        if isinstance(response, dict):
-            rectification = response.get('result', response.get('answer', str(response)))
-        else:
-            rectification = str(response)
-        
-        similar_snags = get_similar_records_with_metadata(vectorstore, final_query, k=5)
-        json_results = display_results_as_json(rectification, similar_snags, final_query)
-        
-        return jsonable_encoder(convert_numpy(json_results))
-
+            if isinstance(response, dict):
+                rectification = response.get('result', response.get('answer', str(response)))
+            else:
+                rectification = str(response)
+            
+            similar_snags = get_similar_records_with_metadata(db, final_query, k=5)
+            json_results = display_results_as_json(rectification, similar_snags, final_query)
+            
+            return jsonable_encoder(convert_numpy(json_results))
 
     except Exception as e:
-        logger.exception("Error during rectification")
         return {"error": str(e)}
+
+# @app.post("/rectify-file")
+# async def rectify_file(request: QueryRequestFile) -> Dict[Any, Any]:
+#     try:
+#         file_name = request.file_name
+#         pb_number = request.pb_number
+#         final_query = request.query
+#         qa_chain, vectorstore = get_chain_file(file_name,pb_number)
+        
+#         # Get AI-generated rectification
+#         response = qa_chain.invoke({"question": final_query})
+
+#         # Extract result
+#         if isinstance(response, dict):
+#             rectification = response.get('result', response.get('answer', str(response)))
+#         else:
+#             rectification = str(response)
+        
+#         similar_snags = get_similar_records_with_metadata(vectorstore, final_query, k=5)
+#         json_results = display_results_as_json(rectification, similar_snags, final_query)
+        
+#         return jsonable_encoder(convert_numpy(json_results))
+
+
+#     except Exception as e:
+#         logger.exception("Error during rectification")
+#         return {"error": str(e)}
 
 
     

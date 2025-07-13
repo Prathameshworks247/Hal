@@ -127,7 +127,7 @@ def display_results_as_json_analysis(response_text: str, similar_snags: List[Dic
     radar_chart = parsed.get("RadarChart", {})
     pie_chart = parsed.get("PieChart", {})
     bar_chart1 = parsed.get("BarChart1", {})
-    bar_chart2 = parsed.get("BarChart2", {})
+    bar_chart2 = parsed["BarChart2"] if "BarChart2" in parsed and parsed["BarChart2"] else None
     
     results = {
         "timestamp": datetime.now().isoformat(),
@@ -148,7 +148,7 @@ def display_results_as_json_analysis(response_text: str, similar_snags: List[Dic
         "RadarChart": [{"category": key, "value": value} for key, value in radar_chart.items()],
         "PieChart": [{"category": key, "value": value} for key, value in pie_chart.items()],
         "BarChart1": [{"category": key, "value": value} for key, value in bar_chart1.items()],
-        "BarChart2": [{"category": key, "value": value} for key, value in bar_chart2.items()]
+        "BarChart2": [{"category": key, "value": value} for key, value in bar_chart2.items()] if bar_chart2 else [],
     }
 
     return results
