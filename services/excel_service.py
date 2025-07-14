@@ -12,13 +12,26 @@ def excel_to_documents(file_path: str) -> list[Document]:
     documents = []
 
     for idx, row in df.iterrows():
-        content_lines = [f"{col}: {row[col]}" for col in df.columns if pd.notna(row[col])]
-        content = "\n".join(content_lines)
+        content_lines = []
 
-        documents.append(
-            Document(
-                page_content=content,
-                metadata={"row_index": idx, "source": file_path.split("/")[-1]}
+        for col in df.columns:
+            value = row[col]
+            if pd.notna(value):  # Only include non-null fields
+                col_clean = str(col).strip().capitalize()
+                value_clean = str(value).strip()
+                content_lines.append(f"{col_clean}: {value_clean}")
+
+        if content_lines:
+            content = "\n".join(content_lines).lower()  # lowercase for embedding consistency
+
+            documents.append(
+                Document(
+                    page_content=content,
+                    metadata={
+                        "row_index": idx,
+                        "source": file_path.split("/")[-1],
+                        "columns": list(df.columns)
+                    }
+                )
             )
-        )
     return documents

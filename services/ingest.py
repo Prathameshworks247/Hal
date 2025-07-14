@@ -20,7 +20,6 @@ EVENT: {row.get("EVENT", "")}
 RAISED BY: {row.get("RAISED_BY", "")}
 STATUS: {row.get("STATUS","")}
 """
-
         metadata={"row_index": idx, "source": file_path.split("/")[-1]}
 
         docs.append(Document(page_content=content.strip(), metadata=metadata))

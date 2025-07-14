@@ -97,6 +97,7 @@ def get_chain_file(file_name, pb_number):
         UPLOAD_DIR = f"uploaded_excels/{pb_number}"
         file_location = os.path.join(UPLOAD_DIR, file_name)
         docs = excel_to_documents(file_location)
+        print(docs[:20])
         if not docs:
             return {"error": "No relevant historical snag records found."}
         model_path = "./all-MiniLM-L6-v2"
