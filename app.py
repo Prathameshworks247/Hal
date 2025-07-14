@@ -7,7 +7,6 @@ from fastapi.responses import JSONResponse
 import pandas as pd
 from fastapi import FastAPI,Depends
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 from typing import Dict, List, Any
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
@@ -22,9 +21,11 @@ import shutil
 from models.models import QueryRequest, ExcelFileInput,GetRows,NamesReq,QueryRequestFile
 from services.chain_service import get_chain, get_chain_file,verify
 from services.similarity_service import  get_similar_records_with_metadata
-from services.excel_service import excel_to_documents
 from services.parsers import process_snag_query_json, display_results_as_json
 from utils.utils import test_retriever, convert_numpy
+from services.chain_service import get_analytics_chain
+from services.parsers import process_snag_query_json_analysis
+from services.chain_service import get_analytics_chain_from_xls
 
 app = FastAPI()
 app.add_middleware(
@@ -182,3 +183,32 @@ async def send_file_names(request: NamesReq):
     except Exception as e:
         logger.exception("Error retrieving file names")
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.post("/analytics")
+async def analyse(request: QueryRequestFile) -> Dict[Any, Any]:
+    try:
+        filename = request.file_name
+        pb_number = request.pb_number
+        final_query = request.query
+
+        if filename == "default":
+            print("🚁 Aircraft Snag Resolution System - JSON Output")
+            print("=" * 50)
+
+            chain, db = get_analytics_chain()
+
+            final_query = request.query 
+
+            print("🔍 Final LLM Query:\n", final_query)
+        else:
+            chain, db = get_analytics_chain_from_xls(filename,pb_number)
+        # Get AI-generated rectification
+        print("🔍 Final LLM Query:\n", final_query)
+
+        json_results = process_snag_query_json_analysis(chain, db, final_query)
+        return convert_numpy(json_results)
+
+    except Exception as e:
+        return {"error": str(e)}
+

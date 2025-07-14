@@ -21,19 +21,17 @@ def get_similar_snags_with_metadata(db, query: str, k: int = 5) -> List[Dict[str
         similar_snags = []
         for i, (doc, score) in enumerate(docs_with_scores):
 
-            snag_match = re.search(r"SNAG:\s*(.*)", doc.page_content)
-            rect_match = re.search(r"RECTIFICATION:\s*(.*)", doc.page_content)
+            key_values = extract_key_values(doc.page_content)
 
-            snag_info = {
+            record = {
                 'rank': i + 1,
-                'snag': snag_match.group(1).strip() if snag_match else "",
-                'rectification': rect_match.group(1).strip() if rect_match else "",
+                'fields': key_values,
                 'metadata': doc.metadata,
                 'similarity_score': float(score),
-                'similarity_percentage': round((1 - score) * 100, 2)
+                'similarity_percentage': round((score) * 100, 2)
             }
 
-            similar_snags.append(snag_info)
+            similar_snags.append(record)
 
         return similar_snags
 
@@ -81,7 +79,7 @@ def get_similar_records_with_metadata(db, query: str, k: int = 5) -> List[Dict[s
                 'fields': key_values,
                 'metadata': doc.metadata,
                 'similarity_score': float(score),
-                'similarity_percentage': round((1 - score) * 100, 2)
+                'similarity_percentage': round((score) * 100, 2)
             }
 
             results.append(record)
@@ -115,7 +113,7 @@ def get_similar_snags_analysis(db, query: str) -> List[Dict[str, Any]]:
                 'rectification': rect_match.group(1).strip() if rect_match else "",
                 'metadata': doc.metadata,
                 'similarity_score': float(score),
-                'similarity_percentage': round((1 - score) * 100, 2)
+                'similarity_percentage': round((score) * 100, 2)
             }
 
             similar_snags.append(snag_info)

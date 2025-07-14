@@ -130,9 +130,6 @@ def display_results_as_json_analysis(response_text: str, similar_snags: List[Dic
     bar_chart2 = parsed["BarChart2"] if "BarChart2" in parsed and parsed["BarChart2"] else None
     
     results = {
-        "timestamp": datetime.now().isoformat(),
-        "query": query,
-        "status": "success",
         "based_on_historical_cases": num_snags,  
         "analytics": {
             "total_similar_cases_found": num_snags,
@@ -145,10 +142,13 @@ def display_results_as_json_analysis(response_text: str, similar_snags: List[Dic
                 else "low"
             ), 
         },
-        "RadarChart": [{"category": key, "value": value} for key, value in radar_chart.items()],
-        "PieChart": [{"category": key, "value": value} for key, value in pie_chart.items()],
-        "BarChart1": [{"category": key, "value": value} for key, value in bar_chart1.items()],
-        "BarChart2": [{"category": key, "value": value} for key, value in bar_chart2.items()] if bar_chart2 else [],
+        "graphs":{
+            "RadarChart": [{"category": key, "value": value} for key, value in radar_chart.items()],
+            "PieChart": [{"category": key, "value": value} for key, value in pie_chart.items()],
+            "BarChart1": [{"category": key, "value": value} for key, value in bar_chart1.items()],
+            "BarChart2": [{"category": key, "value": value} for key, value in bar_chart2.items()] if bar_chart2 else [],
+        }
+       
     }
 
     return results

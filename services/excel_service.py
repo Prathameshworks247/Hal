@@ -18,7 +18,7 @@ def excel_to_documents(file_path: str) -> list[Document]:
         documents.append(
             Document(
                 page_content=content,
-                metadata={"row_index": idx, "source": "excel_row"}
+                metadata={"row_index": idx, "source": file_path.split("/")[-1]}
             )
         )
     return documents
