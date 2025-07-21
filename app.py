@@ -52,10 +52,10 @@ async def rectification(request: QueryRequestFile) -> Dict[Any, Any]:
         file_name = request.file_name
         pb_number = request.pb_number
         final_query = request.query
-        verdict = verify(final_query)
-        print("The Query Is: ", verdict)
-        if not verdict:
-            return  {"error": "please enter a valid query"}
+        # verdict = verify(final_query)
+        # print("The Query Is: ", verdict)
+        # if not verdict:
+        #     return  {"error": "please enter a valid query"}
         print("🚁 Aircraft Snag Resolution System - JSON Output")
         if file_name == 'default':    
             chain, db = get_chain_cached()

@@ -44,28 +44,56 @@ def get_chain():
         logger.info("Retriever configured successfully.")
 
         
-        prompt = PromptTemplate.from_template("""
-        You are an expert aircraft technician with extensive experience in aircraft maintenance and troubleshooting.
+        prompt = PromptTemplate.from_template(
+        """
+You are an expert aircraft technician with extensive experience in aircraft maintenance and troubleshooting.
 
-        Based on the following historical snag records and their rectifications, provide a detailed recommendation for fixing the current snag.
-        
-        Current Snag: {question}
-        
-        Historical Snag Records:
-        {context}
-        
-        Please provide:
-        1. Most likely cause of the issue
-        2. Step-by-step rectification procedure
-        3. Any safety precautions to consider
-        4. Parts that might need replacement
-        5. Expected time to complete the fix
-        
-        ---
-        Rectification:
-        [Provide your detailed rectification steps here]
-    
-        """)
+You will be provided with:
+- A **current aircraft snag report**
+- A list of **historical snag records with their corresponding rectifications**
+
+Your job is to analyze the current snag **strictly using only the information provided in the historical records**.
+
+---
+
+STRICT INSTRUCTIONS:
+- DO NOT guess or fabricate information.
+- ONLY use data present in the historical context.
+- If sufficient information is NOT available in the records, respond with:
+  "INSUFFICIENT DATA IN HISTORICAL RECORDS TO ANSWER THIS."
+
+---
+
+CURRENT SNAG:
+{question}
+
+HISTORICAL SNAG RECORDS:
+{context}
+
+---
+
+Respond strictly in the following format:
+
+1. **Most Likely Cause of the Issue**
+   [State only if evident from historical context, else say "INSUFFICIENT DATA IN HISTORICAL RECORDS TO ANSWER THIS."]
+
+2. **Step-by-Step Rectification Procedure**
+   [Mention procedure only if clearly derivable from context.]
+
+3. **Safety Precautions to Consider**
+   [Include only if explicitly present in the records.]
+
+4. **Parts That Might Need Replacement**
+   [Only list parts that are mentioned in similar past snags.]
+
+5. **Expected Time to Complete the Fix**
+   [State duration only if clearly stated in similar records.]
+
+---
+
+RECTIFICATION:
+[Provide detailed rectification steps strictly based on similar records. If unclear, state: "INSUFFICIENT DATA IN HISTORICAL RECORDS TO PROVIDE DETAILED RECTIFICATION."]
+""")
         logger.info("Getting LLM instance...")
         llm = get_llm()
         logger.info("LLM instance obtained successfully.")
