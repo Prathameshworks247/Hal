@@ -75,20 +75,16 @@ HISTORICAL SNAG RECORDS:
 Respond strictly in the following format:
 
 1. **Most Likely Cause of the Issue**
-   [State only if evident from historical context, else say "INSUFFICIENT DATA IN HISTORICAL RECORDS TO ANSWER THIS."]
+   [State only if evident from historical context]
 
-2. **Step-by-Step Rectification Procedure**
-   [Mention procedure only if clearly derivable from context.]
+2. **Rectification Suggestions**
+   [Mention procedures priority-wise only if it is clearly derivable from context.]
 
 3. **Safety Precautions to Consider**
    [Include only if explicitly present in the records.]
 
 4. **Parts That Might Need Replacement**
    [Only list parts that are mentioned in similar past snags.]
-
-5. **Expected Time to Complete the Fix**
-   [State duration only if clearly stated in similar records.]
-
 ---
 
 RECTIFICATION:
