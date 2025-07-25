@@ -10,7 +10,7 @@ import uuid
 import shutil
 from collections import defaultdict
 import pandas as pd
-import base64
+import re
 from fastapi.responses import StreamingResponse,JSONResponse
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form,Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -151,9 +151,16 @@ async def rectification(request: QueryRequestFile) -> Dict[Any, Any]:
         # print("The Query Is: ", verdict)
         # if not verdict:
         #     return  {"error": "please enter a valid query"}
-        verdict = has_semantic_meaning(final_query)
-        if verdict == False:
+        match = re.search(r"Snag:\s*(.*?)(\s+\w+:|$)", final_query)
+        if not match:
+            return {"error": "Could not find Snag in the query"}
+
+        snag_text = match.group(1).strip()  # extract only the snag part
+        verdict = has_semantic_meaning(snag_text)
+        if not verdict:
+            print(f"=========={verdict}: {snag_text}============")
             return {"error": "please enter a valid query"}
+
         print("🚁 Aircraft Snag Resolution System - JSON Output")
         if file_name == 'default':    
             chain, db = get_chain_cached()
