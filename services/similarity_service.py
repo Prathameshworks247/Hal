@@ -1,36 +1,37 @@
 import re
-import logger
 from typing import List, Dict,Any
+import spacy
+
+nlp = spacy.load("en_core_web_md")  
+
+def has_semantic_meaning(sentence):
+    doc = nlp(sentence)
+    return doc.vector_norm > 0.3  # tweak threshold if needed
+
 
 def get_similar_snags_with_metadata(db, query: str, k: int = 5) -> List[Dict[str, Any]]:
     """
-    Retrieve similar snags with their metadata and similarity scores
-    
-    Args:
-        db: FAISS database instance
-        query: Current snag description
-        k: Number of similar documents to retrieve
-        
-    Returns:
-        List of dictionaries containing document content, metadata, and similarity scores
+    Retrieve similar snags with their metadata and normalized similarity scores.
     """
     try:
-        # Get similar documents with scores
         docs_with_scores = db.similarity_search_with_score(query, k=k)
 
         similar_snags = []
         for i, (doc, score) in enumerate(docs_with_scores):
-
+            if score > 0.9:
+                # similar_snags.append({
+                #      'rank': "none",
+                #     'fields': "none",
+                #     'metadata': "none"
+                # })
+                continue  
             key_values = extract_key_values(doc.page_content)
-
+            
             record = {
                 'rank': i + 1,
                 'fields': key_values,
-                'metadata': doc.metadata,
-                'similarity_score': float(score),
-                'similarity_percentage': round((score) * 100, 2)
+                'metadata': doc.metadata
             }
-
             similar_snags.append(record)
 
         return similar_snags
@@ -73,13 +74,13 @@ def get_similar_records_with_metadata(db, query: str, k: int = 5) -> List[Dict[s
         results = []
         for i, (doc, score) in enumerate(docs_with_scores):
             key_values = extract_key_values(doc.page_content)
+            if score>0.9:
+                continue
 
             record = {
                 'rank': i + 1,
                 'fields': key_values,
-                'metadata': doc.metadata,
-                'similarity_score': float(score),
-                'similarity_percentage': round((score) * 100, 2)
+                'metadata': doc.metadata
             }
 
             results.append(record)

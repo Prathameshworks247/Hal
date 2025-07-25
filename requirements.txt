@@ -12,7 +12,7 @@ huggingface-hub
 
 # Vector store
 faiss-cpu
-
+numpy
 # Typing & Logging (built-in, no need to install separately)
 # typing
 # logging
@@ -24,3 +24,10 @@ python-dotenv
 langchain-google-genai
 pandas
 python-multipart
+openpyxl
+logger
+
+opencv-contrib-python==4.9.0.80  # Required for cv2.aruco module
+numpy==1.26.4                    # For matrix and image processing
+matplotlib==3.7.1     
+xlrd

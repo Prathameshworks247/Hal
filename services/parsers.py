@@ -4,6 +4,7 @@ from services.similarity_service import get_similar_snags_with_metadata
 from datetime import datetime
 from services.similarity_service import get_similar_snags_analysis
 from utils.utils import  clean_json_block
+
 logger = logging.getLogger(__name__)
 
 def process_snag_query_json(chain, db, query: str) -> Dict[str, Any]:

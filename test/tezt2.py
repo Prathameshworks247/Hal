@@ -1,17 +1,6 @@
-import requests
+import torch
+import numpy as np
 
-response = requests.post(
-    "http://192.168.2.53:7000/analytics",
-    json={
-        "query": "TR Vibrations",
-        "helicopter_type": "",
-        "flight_hours": "",
-        "event_type": "",
-        "status": "",
-        "raised_by": ""
-    }
-)
-
-print("Status Code:", response.status_code)
-print(response.json())
-
+a = torch.tensor([1.0, 2.0])
+print("PyTorch tensor:", a)
+print("Converted to NumPy:", a.numpy())

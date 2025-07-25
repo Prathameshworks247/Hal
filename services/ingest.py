@@ -11,15 +11,15 @@ def load_snag_excel(file_path):
     docs = []
     for idx, (_, row) in enumerate(df.iterrows()):
         content = f"""
-SNAG: {row.get("SNAG_DESCRIPTION", "")}
-RECTIFICATION: {row.get("RECTIFICATION", "")}
-HELI NO: {row.get("HELI_NO", "")}
-HELI HOURS: {row.get("HELI_HOURS", "")}
-SNAG DATE: {row.get("SNAG_DATE", "")}
-EVENT: {row.get("EVENT", "")}
-RAISED BY: {row.get("RAISED_BY", "")}
-STATUS: {row.get("STATUS","")}
-"""
+            SNAG: {row.get("SNAG_DESCRIPTION", "")}
+            RECTIFICATION: {row.get("RECTIFICATION", "")}
+            HELI NO: {row.get("HELI_NO", "")}
+            HELI HOURS: {row.get("HELI_HOURS", "")}
+            SNAG DATE: {row.get("SNAG_DATE", "")}
+            EVENT: {row.get("EVENT", "")}
+            RAISED BY: {row.get("RAISED_BY", "")}
+            STATUS: {row.get("STATUS","")}
+            """
         metadata={"row_index": idx, "source": file_path.split("/")[-1]}
 
         docs.append(Document(page_content=content.strip(), metadata=metadata))

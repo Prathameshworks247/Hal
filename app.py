@@ -2,23 +2,27 @@
 from datetime import datetime
 import os
 import logging
+import cv2
+import numpy as np
+import os
+import io
+import uuid
+import shutil
 from collections import defaultdict
-from fastapi.responses import JSONResponse
 import pandas as pd
-from fastapi import FastAPI,Depends
+import base64
+from fastapi.responses import StreamingResponse,JSONResponse
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form,Depends
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict, List, Any
-from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain.chains import RetrievalQA
-from langchain_core.prompts import PromptTemplate
-from langchain.docstore.document import Document
+from fastapi.staticfiles import StaticFiles
 from collections import defaultdict
 from services.llm import get_llm
 from fastapi.encoders import jsonable_encoder
 from functools import lru_cache
 import shutil
-from models.models import QueryRequest, ExcelFileInput,GetRows,NamesReq,QueryRequestFile
+from services.llm import get_llm
+from models.models import ExcelFileInput,GetRows,NamesReq,QueryRequestFile,ShapeDetectionResponse
 from services.chain_service import get_chain, get_chain_file,verify
 from services.similarity_service import  get_similar_records_with_metadata
 from services.parsers import process_snag_query_json, display_results_as_json
@@ -26,8 +30,10 @@ from utils.utils import test_retriever, convert_numpy
 from services.chain_service import get_analytics_chain
 from services.parsers import process_snag_query_json_analysis
 from services.chain_service import get_analytics_chain_from_xls
+from services.similarity_service import has_semantic_meaning
+from vision.funcs import detect_shapes,get_pixels_per_mm,save_to_csv
 
-app = FastAPI()
+app = FastAPI(title="Aircraft AI API", description="")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  
@@ -35,6 +41,95 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.mount("/static", StaticFiles(directory="static"), name="static")
+os.makedirs("uploads", exist_ok=True)
+os.makedirs("outputs", exist_ok=True)
+os.makedirs("static", exist_ok=True)
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@app.post("/detect-shapes", response_model=ShapeDetectionResponse)
+async def detect_shapes_endpoint(
+    file: UploadFile = File(...),
+    aruco_marker_size: float = Form(50.0, description="ArUco marker size in mm")
+):
+    """
+    Upload an image with shapes and ArUco marker to get measurements
+    """
+    if not file.content_type.startswith('image/'):
+        raise HTTPException(status_code=400, detail="File must be an image")
+    
+    try:
+        unique_id = str(uuid.uuid4())
+        
+        contents = await file.read()
+        nparr = np.frombuffer(contents, np.uint8)
+        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        if image is None:
+            raise HTTPException(status_code=400, detail="Could not decode image")
+        
+        pixels_per_mm = get_pixels_per_mm(image, aruco_marker_size)
+        
+        if pixels_per_mm is None:
+            return ShapeDetectionResponse(
+                success=False,
+                message="ArUco marker not detected in the image. Please ensure a clear ArUco marker is present.",
+                shapes_detected=0
+            )
+        
+        # Detect shapes
+        output_image, shape_data = detect_shapes(image, pixels_per_mm)
+        
+        # Save processed image
+        output_image_path = f"static/processed_{unique_id}.jpg"
+        cv2.imwrite(output_image_path, output_image)
+
+        # Save CSV data
+        csv_path = f"static/shapes_{unique_id}.csv"
+        save_to_csv(shape_data, csv_path)
+
+        # Convert image to memory buffer
+        _, img_encoded = cv2.imencode('.jpg', output_image)
+        img_bytes = io.BytesIO(img_encoded.tobytes())
+
+        # Convert numpy types for JSON headers
+        for shape in shape_data:
+            for key, value in shape.items():
+                if isinstance(value, (np.generic, np.ndarray)):
+                    shape[key] = value.item() if hasattr(value, "item") else value.tolist()
+
+        # Create downloadable CSV link
+        csv_url = f"/static/shapes_{unique_id}.csv"
+        photo_url = f'static/processed_{unique_id}.jpg'
+
+        headers = {
+            "X-CSV-Download-URL": csv_url,
+            "X-Photo-Download-URL":photo_url,
+            "X-Shapes-Detected": str(len(shape_data))
+        }
+        return StreamingResponse(
+            content=img_bytes,
+            media_type="image/jpeg",
+            headers=headers
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Processing error: {str(e)}")
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {"status": "healthy", "service": "Shape Detection API"}
+
+@app.on_event("startup")
+async def cleanup_old_files():
+    """Clean up old files on server startup"""
+    try:
+        for file in os.listdir("static"):
+            if file.startswith(("processed_", "shapes_")):
+                os.remove(f"static/{file}")
+    except:
+        pass
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -56,6 +151,9 @@ async def rectification(request: QueryRequestFile) -> Dict[Any, Any]:
         # print("The Query Is: ", verdict)
         # if not verdict:
         #     return  {"error": "please enter a valid query"}
+        verdict = has_semantic_meaning(final_query)
+        if verdict == False:
+            return {"error": "please enter a valid query"}
         print("🚁 Aircraft Snag Resolution System - JSON Output")
         if file_name == 'default':    
             chain, db = get_chain_cached()
