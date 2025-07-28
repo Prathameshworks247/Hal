@@ -36,17 +36,29 @@ from vision.funcs import detect_shapes,get_pixels_per_mm,save_to_csv
 app = FastAPI(title="Aircraft AI API", description="")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  
+    allow_origins=["*"],  # Replace with your frontend's origin (e.g., React dev server)
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-)
+    expose_headers=["X-CSV-Download-URL", "X-Photo-Download-URL", "X-Shapes-Detected"]  # Key addition: exposes them globally
+) 
+
 app.mount("/static", StaticFiles(directory="static"), name="static")
 os.makedirs("uploads", exist_ok=True)
 os.makedirs("outputs", exist_ok=True)
 os.makedirs("static", exist_ok=True)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@app.get("/test-headers")
+def test_headers():
+    headers = {
+        "X-CSV-Download-URL": "/static/test.csv",
+        "X-Photo-Download-URL": "/static/test.jpg",
+        "X-Shapes-Detected": "5",
+        "Access-Control-Expose-Headers": "X-CSV-Download-URL,X-Photo-Download-URL,X-Shapes-Detected"
+    }
+    return JSONResponse(content={"message": "Test"}, headers=headers)
 
 @app.post("/detect-shapes", response_model=ShapeDetectionResponse)
 async def detect_shapes_endpoint(
@@ -100,7 +112,7 @@ async def detect_shapes_endpoint(
                     shape[key] = value.item() if hasattr(value, "item") else value.tolist()
 
         # Create downloadable CSV link
-        csv_url = f"/static/shapes_{unique_id}.csv"
+        csv_url = f"static/shapes_{unique_id}.csv"
         photo_url = f'static/processed_{unique_id}.jpg'
 
         headers = {

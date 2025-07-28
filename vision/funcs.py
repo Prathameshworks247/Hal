@@ -2,16 +2,7 @@
 import cv2
 import numpy as np
 import csv
-import os
-import io
-import tempfile
-import uuid
-from typing import Optional
-import base64
-from fastapi.responses import StreamingResponse
-from starlette.responses import JSONResponse
-from pydantic import BaseModel
-import shutil
+
 
 def get_pixels_per_mm(image, aruco_marker_length_mm=50, aruco_dict_type=cv2.aruco.DICT_4X4_50):
     """Detect ArUco marker and calculate pixel-to-mm ratio"""
