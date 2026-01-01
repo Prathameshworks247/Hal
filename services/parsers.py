@@ -21,8 +21,7 @@ def process_snag_query_json(
     conversation_context: dict = None,
     session_manager: Optional[SessionFAISSManager] = None,
     citation_session_id: Optional[str] = None,
-    department: Optional[str] = None,
-    document_type: Optional[str] = None
+    department: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Process snag query with optional conversation context and session awareness.
@@ -82,11 +81,10 @@ def process_snag_query_json(
             logger.info("Retrieving from GLOBAL_FAISS + SESSION_FAISS (conversation memory)")
             
             # Priority: Frontend metadata > LLM inference
-            if department or document_type:
+            if department:
                 # Frontend provided metadata - use it directly
-                logger.info(f"Using frontend-provided metadata - dept: {department}, type: {document_type}")
+                logger.info(f"Using frontend-provided metadata - dept: {department}")
                 dept = department
-                doc_type = document_type
                 use_filtering = True
             else:
                 # No frontend metadata - infer from query using LLM
@@ -96,26 +94,22 @@ def process_snag_query_json(
                 # Only use if confident
                 if inferred_metadata.get("confidence") in ["high", "medium"]:
                     dept = inferred_metadata.get("department")
-                    doc_type = inferred_metadata.get("document_type")
-                    use_filtering = bool(dept or doc_type)
+                    use_filtering = bool(dept)
                     if use_filtering:
-                        logger.info(f"Using LLM-inferred metadata - dept: {dept}, type: {doc_type}, confidence: {inferred_metadata.get('confidence')}")
+                        logger.info(f"Using LLM-inferred metadata - dept: {dept}, confidence: {inferred_metadata.get('confidence')}")
                 else:
                     dept = None
-                    doc_type = None
                     use_filtering = False
                     logger.info("Low confidence in metadata inference, using unfiltered search")
             
             # Apply filtering if we have metadata (from frontend or LLM)
             if use_filtering:
-                logger.info(f"Applying metadata filter - dept: {dept}, type: {doc_type}")
+                logger.info(f"Applying metadata filter - dept: {dept}")
                 
                 # Build filter function for FAISS
                 def metadata_filter(doc_metadata):
                     match = True
                     if dept and doc_metadata.get("department") != dept:
-                        match = False
-                    if doc_type and doc_metadata.get("document_type") != doc_type:
                         match = False
                     return match
                 
@@ -161,11 +155,10 @@ def process_snag_query_json(
             logger.info("Retrieving from GLOBAL_FAISS only (no session)")
             
             # Priority: Frontend metadata > LLM inference
-            if department or document_type:
+            if department:
                 # Frontend provided metadata - use it directly
-                logger.info(f"Using frontend-provided metadata - dept: {department}, type: {document_type}")
+                logger.info(f"Using frontend-provided metadata - dept: {department}")
                 dept = department
-                doc_type = document_type
                 use_filtering = True
             else:
                 # No frontend metadata - infer from query using LLM
@@ -175,26 +168,22 @@ def process_snag_query_json(
                 # Only use if confident
                 if inferred_metadata.get("confidence") in ["high", "medium"]:
                     dept = inferred_metadata.get("department")
-                    doc_type = inferred_metadata.get("document_type")
-                    use_filtering = bool(dept or doc_type)
+                    use_filtering = bool(dept)
                     if use_filtering:
-                        logger.info(f"Using LLM-inferred metadata - dept: {dept}, type: {doc_type}, confidence: {inferred_metadata.get('confidence')}")
+                        logger.info(f"Using LLM-inferred metadata - dept: {dept}, confidence: {inferred_metadata.get('confidence')}")
                 else:
                     dept = None
-                    doc_type = None
                     use_filtering = False
                     logger.info("Low confidence in metadata inference, using unfiltered search")
             
             # Apply filtering if we have metadata (from frontend or LLM)
             if use_filtering:
-                logger.info(f"Applying metadata filter - dept: {dept}, type: {doc_type}")
+                logger.info(f"Applying metadata filter - dept: {dept}")
                 
                 # Build filter function for FAISS
                 def metadata_filter(doc_metadata):
                     match = True
                     if dept and doc_metadata.get("department") != dept:
-                        match = False
-                    if doc_type and doc_metadata.get("document_type") != doc_type:
                         match = False
                     return match
                 

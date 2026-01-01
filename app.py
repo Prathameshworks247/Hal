@@ -413,8 +413,7 @@ async def rectification(request: QueryRequestFile, background_tasks: BackgroundT
                 chain, db, search_query, final_query, conversation_context,
                 session_manager=session_manager,
                 citation_session_id=session_id,
-                department=target_department, # Pass explicit or inferred department
-                document_type=request.document_type
+                department=target_department # Pass explicit or inferred department
             )
             
             # Add conversation memory to SESSION_FAISS (in background)
@@ -1109,8 +1108,7 @@ async def admin_ingest_file(
     file: UploadFile = File(...),
     incremental: bool = Form(True),
     index_path: str = Form("snag_faiss_index"),
-    department: str = Form(None),
-    document_type: str = Form(None)
+    department: str = Form(None)
 ):
     """
     Admin endpoint: Ingest a single file into the global FAISS index.
@@ -1134,8 +1132,7 @@ async def admin_ingest_file(
             file_path=temp_path,
             index_path=index_path,
             incremental=incremental,
-            department=department,
-            document_type=document_type
+            department=department
         )
         
         # Clean up temp file

@@ -27,8 +27,7 @@ def ingest_single_file(
     index_path: str = "snag_faiss_index",
     incremental: bool = True,
     use_ocr: bool = False,
-    department: Optional[str] = None,
-    document_type: Optional[str] = None
+    department: Optional[str] = None
 ) -> dict:
     """
     Ingest a single file into the FAISS index.
@@ -39,7 +38,6 @@ def ingest_single_file(
         incremental: If True, add to existing index; if False, create new
         use_ocr: If True, use OCR for scanned PDFs
         department: Department classification (e.g., 'structures', 'avionics', 'propulsion')
-        document_type: Document type (e.g., 'manual', 'training_manual', 'inspection_report')
     
     Returns:
         Dictionary with ingestion results
@@ -81,14 +79,11 @@ def ingest_single_file(
                 "error": f"No content extracted from {file_name}"
             }
         
-        # Inject department and document_type metadata into EVERY document chunk
-        if department or document_type:
+        # Inject department metadata into EVERY document chunk
+        if department:
             for doc in documents:
-                if department:
-                    doc.metadata["department"] = department
-                if document_type:
-                    doc.metadata["document_type"] = document_type
-            logger.info(f"Injected metadata - department: {department}, document_type: {document_type}")
+                doc.metadata["department"] = department
+            logger.info(f"Injected metadata - department: {department}")
         
         # Validate multimodal documents
         if not validate_multimodal_documents(documents):
@@ -109,8 +104,7 @@ def ingest_single_file(
             embeddings=embeddings,
             incremental=incremental,
             source_file=file_path,
-            department=department,
-            document_type=document_type
+            department=department
         )
         
         if success:
@@ -414,20 +408,15 @@ if __name__ == "__main__":
             
             # Parse optional metadata flags
             department = None
-            document_type = None
             for i, arg in enumerate(sys.argv):
                 if arg == "--department" or arg == "-d":
                     if i + 1 < len(sys.argv):
                         department = sys.argv[i + 1]
-                elif arg == "--type" or arg == "-t":
-                    if i + 1 < len(sys.argv):
-                        document_type = sys.argv[i + 1]
             
             result = ingest_single_file(
                 file_path, 
                 incremental=incremental,
-                department=department,
-                document_type=document_type
+                department=department
             )
             print(result)
         
@@ -464,13 +453,12 @@ if __name__ == "__main__":
         
         else:
             print("Usage:")
-            print("  python ingest.py file <path> [incremental] [--department <dept>] [--type <type>]")
+            print("  python ingest.py file <path> [incremental] [--department <dept>]")
             print("  python ingest.py dir <path>")
             print("  python ingest.py rebuild <path1> [path2] ...")
             print("  python ingest.py info")
             print("\nMetadata flags:")
             print("  --department, -d <dept>    Department (e.g., structures, avionics, propulsion)")
-            print("  --type, -t <type>          Document type (e.g., manual, training_manual, inspection_report)")
     else:
         # Default behavior
         ingest()

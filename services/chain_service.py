@@ -32,8 +32,9 @@ def get_chain(department: Optional[str] = None):
         
         # Base index path
         base_path = "snag_faiss_index"
+        db = None
         
-        # Determine specific index path based on department routing
+        # Determine specific index path or merge all
         if department:
             # Route to department-specific index
             # Structure: snag_faiss_index/{department}/faiss_index
@@ -50,25 +51,51 @@ def get_chain(department: Optional[str] = None):
                 if not os.path.exists(faiss_index_path):
                      logger.warning(f"General index not found at {faiss_index_path}. Falling back to ROOT index.")
                      faiss_index_path = base_path
+            
+            if os.path.exists(faiss_index_path):
+                db = FAISS.load_local(
+                    faiss_index_path, 
+                    embeddings=embeddings, 
+                    allow_dangerous_deserialization=True
+                )
         else:
-            # No department provided - use general index or legacy root
-            # Try general subfolder first (new structure)
-            general_path = os.path.join(base_path, "general", "faiss_index")
-            if os.path.exists(general_path):
-                faiss_index_path = general_path
-            else:
-                # Legacy root path
-                faiss_index_path = base_path
-
-        if not os.path.exists(faiss_index_path):
-            raise FileNotFoundError(f"FAISS index not found at {faiss_index_path}")
+            # GLOBAL SEARCH: Merge all departmental indices
+            if os.path.exists(base_path):
+                subdirs = [d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d))]
+                logger.info(f"Discovery: Found {len(subdirs)} possible department indices for global search")
+                
+                for subdir in subdirs:
+                    dept_idx_path = os.path.join(base_path, subdir, "faiss_index")
+                    if os.path.exists(dept_idx_path):
+                        try:
+                            logger.info(f"Merging department index: {subdir}")
+                            dept_db = FAISS.load_local(
+                                dept_idx_path, 
+                                embeddings=embeddings, 
+                                allow_dangerous_deserialization=True
+                            )
+                            if db is None:
+                                db = dept_db
+                            else:
+                                db.merge_from(dept_db)
+                        except Exception as e:
+                            logger.error(f"Error merging index from {subdir}: {e}")
+            
+            # Fallback for legacy structure: index.faiss in root of snag_faiss_index
+            if db is None:
+                legacy_root_index = os.path.join(base_path, "index.faiss")
+                if os.path.exists(legacy_root_index):
+                    logger.info("No department indices found. Loading legacy ROOT index.")
+                    db = FAISS.load_local(
+                        base_path, 
+                        embeddings=embeddings, 
+                        allow_dangerous_deserialization=True
+                    )
         
-        db = FAISS.load_local(
-            faiss_index_path, 
-            embeddings=embeddings, 
-            allow_dangerous_deserialization=True
-        )
-        logger.info(f"FAISS index loaded successfully from {faiss_index_path}.")
+        if db is None:
+            raise FileNotFoundError(f"No FAISS indices found to load in {base_path}")
+        
+        logger.info("FAISS index (Specific or Merged) loaded successfully.")
 
         # Use MMR (Max Marginal Relevance) for better diversity
         retriever = db.as_retriever(

@@ -58,7 +58,6 @@ Document Chunk {
         source_file: str
         page_number: int
         chunk_index: int
-        document_type: str
         ocr_applied: bool
     }
 }

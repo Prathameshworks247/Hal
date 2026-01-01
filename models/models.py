@@ -28,7 +28,6 @@ class QueryRequestFile(BaseModel):
     conversation_history: List[ConversationMessage] = []  # Default to empty list
     pb_number: Optional[str] = None  # Optional - extracted from auth context
     department: Optional[str] = None  # Optional - for Global FAISS filtering
-    document_type: Optional[str] = None  # Optional - for Global FAISS filtering
     
 class NamesReq(BaseModel):
     pb_number: str

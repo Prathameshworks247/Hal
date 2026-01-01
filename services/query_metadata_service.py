@@ -1,6 +1,6 @@
 """
 Query analysis service for inferring metadata from user queries.
-Used to enhance Global FAISS retrieval with department and document_type filtering.
+Used to enhance Global FAISS retrieval with department filtering.
 """
 import logging
 from typing import Dict, Optional
@@ -13,13 +13,13 @@ logger = logging.getLogger(__name__)
 
 def infer_query_metadata(query: str) -> Dict[str, Optional[str]]:
     """
-    Infer department and document_type from user query using LLM.
+    Infer department from user query using LLM.
     
     Args:
         query: User's search query
         
     Returns:
-        Dictionary with 'department' and 'document_type' (None if cannot infer)
+        Dictionary with 'department' (None if cannot infer)
     """
     try:
         prompt = PromptTemplate.from_template("""
@@ -33,13 +33,6 @@ DEPARTMENTS (choose ONE or return null):
 - general: if the query fits general aviation or multiple categories
 - null: If the query doesn't clearly fit any department
 
-DOCUMENT TYPES (choose ONE or return null):
-- manual: Maintenance manuals, technical manuals, service manuals
-- training_manual: Training materials, educational documents
-- inspection_report: Inspection procedures, checklists, reports
-- troubleshooting_guide: Troubleshooting procedures, diagnostic guides
-- null: If the query doesn't clearly specify a document type
-
 ---
 
 USER QUERY:
@@ -49,14 +42,12 @@ USER QUERY:
 
 INSTRUCTIONS:
 1. Analyze the query to determine which department it relates to
-2. Determine what type of document the user is likely looking for
-3. Only return a value if you are CONFIDENT (>80% sure)
-4. Return "null" if uncertain or if the query is too general
+2. Only return a value if you are CONFIDENT (>80% sure)
+3. Return "null" if uncertain or if the query is too general
 
 RESPOND IN THIS EXACT FORMAT (valid JSON only):
 {{
-  "department": "structures" or "avionics" or "propulsion" or "hydraulics" or "electrical" or null,
-  "document_type": "manual" or "training_manual" or "inspection_report" or "troubleshooting_guide" or null,
+  "department": "structures" or "avionics" or "propulsion" or "maintenance" or "general" or null,
   "confidence": "high" or "medium" or "low"
 }}
 
@@ -81,19 +72,15 @@ Do not include any explanation, just the JSON.
         
         # Extract values, converting "null" strings to None
         department = parsed.get("department")
-        document_type = parsed.get("document_type")
         confidence = parsed.get("confidence", "low")
         
         if department == "null":
             department = None
-        if document_type == "null":
-            document_type = None
         
-        logger.info(f"Query metadata inference - dept: {department}, type: {document_type}, confidence: {confidence}")
+        logger.info(f"Query metadata inference - dept: {department}, confidence: {confidence}")
         
         return {
             "department": department,
-            "document_type": document_type,
             "confidence": confidence
         }
         
@@ -101,29 +88,25 @@ Do not include any explanation, just the JSON.
         logger.warning(f"Failed to infer query metadata: {str(e)}")
         return {
             "department": None,
-            "document_type": None,
             "confidence": "none"
         }
 
 
-def create_metadata_filter(department: Optional[str] = None, document_type: Optional[str] = None) -> Optional[Dict]:
+def create_metadata_filter(department: Optional[str] = None) -> Optional[Dict]:
     """
     Create a metadata filter for FAISS retrieval.
     
     Args:
         department: Department to filter by
-        document_type: Document type to filter by
         
     Returns:
         Filter dictionary or None if no filters
     """
-    if not department and not document_type:
+    if not department:
         return None
     
     filter_dict = {}
     if department:
         filter_dict["department"] = department
-    if document_type:
-        filter_dict["document_type"] = document_type
     
     return filter_dict
