@@ -222,10 +222,7 @@ async def rectification(request: QueryRequestFile) -> Dict[Any, Any]:
         
 #         similar_snags = get_similar_records_with_metadata(vectorstore, final_query, k=5)
 #         json_results = display_results_as_json(rectification, similar_snags, final_query)
-        
 #         return jsonable_encoder(convert_numpy(json_results))
-
-
 #     except Exception as e:
 #         logger.exception("Error during rectification")
 #         return {"error": str(e)}

@@ -1,33 +1,57 @@
-fastapi
-uvicorn[standard]
+# fastapi
+# uvicorn[standard]
 
-# LangChain & related components
-langchain
-langchain-community
-langchain-core
+# # LangChain & related components
+# langchain
+# langchain-community
+# langchain-core
 
-# Embeddings
-sentence-transformers
-huggingface-hub
+# # Embeddings
+# sentence-transformers
+# huggingface-hub
 
-# Vector store
-faiss-cpu
-numpy
-# Typing & Logging (built-in, no need to install separately)
-# typing
-# logging
+# # Vector store
+# faiss-cpu
+# numpy
+# # Typing & Logging (built-in, no need to install separately)
+# # typing
+# # logging
 
-# If you’re using dotenv to load env vars
-python-dotenv
+# # If you’re using dotenv to load env vars
+# python-dotenv
 
-# If using Google GenAI (optional, but you imported it earlier)
-langchain-google-genai
-pandas
-python-multipart
-openpyxl
-logger
+# # If using Google GenAI (optional, but you imported it earlier)
+# langchain-google-genai
+# pandas
+# python-multipart
+# openpyxl
+# logger
 
-opencv-contrib-python==4.9.0.80  # Required for cv2.aruco module
-numpy==1.26.4                    # For matrix and image processing
-matplotlib==3.7.1     
-xlrd
+# numpy==1.26.4                    # For matrix and image processing
+# matplotlib==3.7.1     
+# xlrd
+
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+
+langchain==0.3.27
+langchain-community==0.3.27
+langchain-core==0.3.72
+
+sentence-transformers==5.0.0
+huggingface-hub==0.33.5
+
+faiss-cpu==1.11.0.post1
+numpy==1.26.4
+
+python-dotenv==1.1.1
+
+langchain-google-genai==2.1.8
+
+pandas==2.3.1
+python-multipart==0.0.20
+openpyxl==3.1.5
+logger==1.4
+
+matplotlib==3.7.1
+xlrd==2.0.2
