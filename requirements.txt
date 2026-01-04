@@ -31,27 +31,51 @@
 # matplotlib==3.7.1     
 # xlrd
 
+# Core API Framework
 fastapi==0.116.1
 uvicorn[standard]==0.35.0
+python-multipart==0.0.20
 
+# LangChain & RAG Components
 langchain==0.3.27
 langchain-community==0.3.27
 langchain-core==0.3.72
 
+# Embeddings & Vector Store
 sentence-transformers==5.0.0
 huggingface-hub==0.33.5
-
 faiss-cpu==1.11.0.post1
+
+# Data Processing
 numpy==1.26.4
-
-python-dotenv==1.1.1
-
-langchain-google-genai==2.1.8
-
 pandas==2.3.1
-python-multipart==0.0.20
+
+# Document Parsing - Multi-format Support
+# PDF parsing (choose one or both)
+pymupdf==1.24.0  # Recommended: Fast and feature-rich
+# pdfplumber==0.11.0  # Alternative: Good for tables
+
+# DOCX parsing
+python-docx==1.1.0
+
+# Excel parsing
 openpyxl==3.1.5
+xlrd==2.0.2
+
+# NLP & Semantic Analysis
+spacy==3.8.7
+# Download model: python -m spacy download en_core_web_md
+# en_core_web_md==3.8.0
+
+# Utilities
+python-dotenv==1.1.1
 logger==1.4
 
+# Optional: Google GenAI (if using cloud features)
+langchain-google-genai==2.1.8
+
+# Visualization (for analytics)
 matplotlib==3.7.1
-xlrd==2.0.2
+
+# Computer Vision (for shape detection feature)
+opencv-python==4.8.1.78
