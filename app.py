@@ -176,14 +176,15 @@ async def rectification(request: QueryRequestFile) -> Dict[Any, Any]:
         
         logger.info(f"Query verified successfully. Quality score: {verification_details.get('quality_score', 0):.2f}")
         
-        # Legacy snag extraction for backward compatibility
+        # Optional: Extract snag if present (for backward compatibility)
+        # But don't require it - allow general queries too
         match = re.search(r"Snag:\s*(.*?)(\s+\w+:|$)", final_query)
         if match:
             snag_text = match.group(1).strip()
             # Additional semantic check on snag text
             if not has_semantic_meaning(snag_text):
-                print(f"=========={False}: {snag_text}============")
-                return {"error": "Snag description lacks semantic meaning. Please provide more details."}
+                logger.warning(f"Snag text lacks semantic meaning: {snag_text}")
+                # Don't block - just log warning
 
         print("🚁 Aircraft Snag Resolution System - JSON Output")
         if file_name == 'default':    
