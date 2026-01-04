@@ -29,6 +29,7 @@ from services.citation_service import create_traceable_response, extract_citatio
 from services.document_parser import parse_document, get_supported_formats, check_format_support
 from services.incremental_learning import IncrementalLearningManager, create_or_update_index
 from services.rbac_service import get_rbac_manager, Role, Permission
+from services.ingest import ingest_single_file, ingest_directory, rebuild_index_from_scratch, get_index_info
 from services.similarity_service import  get_similar_records_with_metadata
 from services.parsers import process_snag_query_json, display_results_as_json
 from utils.utils import test_retriever, convert_numpy
@@ -521,4 +522,192 @@ def _get_query_recommendations(verification_details: Dict[str, Any]) -> List[str
         recommendations.append("Try to be more specific about the problem or question")
     
     return recommendations
+
+
+# ============================================================================
+# ADMIN ENDPOINTS FOR GLOBAL INDEX MANAGEMENT
+# ============================================================================
+
+@app.post("/admin/ingest/file")
+async def admin_ingest_file(
+    file: UploadFile = File(...),
+    incremental: bool = Form(True),
+    index_path: str = Form("snag_faiss_index")
+):
+    """
+    Admin endpoint: Ingest a single file into the global FAISS index.
+    Supports PDF, DOCX, TXT, XLS, XLSX.
+    """
+    try:
+        # Save uploaded file temporarily
+        temp_dir = "temp_uploads"
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        file_name = file.filename
+        temp_path = os.path.join(temp_dir, file_name)
+        
+        with open(temp_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        logger.info(f"Admin ingesting file: {file_name}")
+        
+        # Ingest file
+        result = ingest_single_file(
+            file_path=temp_path,
+            index_path=index_path,
+            incremental=incremental
+        )
+        
+        # Clean up temp file
+        try:
+            os.remove(temp_path)
+        except:
+            pass
+        
+        if result["success"]:
+            return {
+                "success": True,
+                "message": f"Successfully ingested {file_name}",
+                "details": result
+            }
+        else:
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "success": False,
+                    "error": result.get("error", "Unknown error")
+                }
+            )
+            
+    except Exception as e:
+        logger.exception("Error in admin file ingestion")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "error": str(e)
+            }
+        )
+
+
+@app.post("/admin/ingest/directory")
+async def admin_ingest_directory(
+    directory_path: str = Form(...),
+    recursive: bool = Form(True),
+    index_path: str = Form("snag_faiss_index")
+):
+    """
+    Admin endpoint: Ingest all supported files from a directory.
+    Useful for batch ingestion of multiple documents.
+    """
+    try:
+        logger.info(f"Admin ingesting directory: {directory_path}")
+        
+        result = ingest_directory(
+            directory_path=directory_path,
+            index_path=index_path,
+            recursive=recursive
+        )
+        
+        if result["success"]:
+            return {
+                "success": True,
+                "message": f"Processed {result['processed']} files successfully",
+                "details": result
+            }
+        else:
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "success": False,
+                    "error": result.get("error", "Unknown error")
+                }
+            )
+            
+    except Exception as e:
+        logger.exception("Error in admin directory ingestion")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "error": str(e)
+            }
+        )
+
+
+@app.post("/admin/index/rebuild")
+async def admin_rebuild_index(
+    source_paths: List[str] = Form(...),
+    index_path: str = Form("snag_faiss_index")
+):
+    """
+    Admin endpoint: Rebuild the entire FAISS index from scratch.
+    WARNING: This will delete the existing index and rebuild it.
+    """
+    try:
+        logger.info(f"Admin rebuilding index from {len(source_paths)} sources")
+        
+        result = rebuild_index_from_scratch(
+            source_paths=source_paths,
+            index_path=index_path
+        )
+        
+        if result["success"]:
+            return {
+                "success": True,
+                "message": f"Index rebuilt with {result['total_documents']} documents",
+                "details": result
+            }
+        else:
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "success": False,
+                    "error": result.get("error", "Unknown error")
+                }
+            )
+            
+    except Exception as e:
+        logger.exception("Error in admin index rebuild")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "error": str(e)
+            }
+        )
+
+
+@app.get("/admin/index/info")
+async def admin_get_index_info(index_path: str = "snag_faiss_index"):
+    """
+    Admin endpoint: Get information about the global FAISS index.
+    Returns statistics, sources, and metadata.
+    """
+    try:
+        result = get_index_info(index_path)
+        
+        if result.get("exists"):
+            return {
+                "success": True,
+                "index_info": result
+            }
+        else:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "success": False,
+                    "error": result.get("error", "Index not found")
+                }
+            )
+            
+    except Exception as e:
+        logger.exception("Error getting index info")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "error": str(e)
+            }
+        )
 
