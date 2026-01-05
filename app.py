@@ -134,7 +134,7 @@ async def detect_shapes_endpoint(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Processing error: {str(e)}")
 
-@app.get("/health")
+@app.get("/system/health")
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "service": "Shape Detection API"}
@@ -159,7 +159,7 @@ def get_chain_file_chached(file_name, pb_number):
     return get_chain_file(file_name, pb_number)
 
 
-@app.post("/rectify")
+@app.post("/user/rectify")
 async def rectification(request: QueryRequestFile) -> Dict[Any, Any]:
     try:
         file_name = request.file_name
@@ -243,7 +243,7 @@ async def rectification(request: QueryRequestFile) -> Dict[Any, Any]:
 
 
     
-@app.post("/get_unique_row", response_model=Dict[str, List[str]])
+@app.post("/user/file-columns", response_model=Dict[str, List[str]])
 def get_unique_row(request: GetRows):
     try:
         DIR = f"uploaded_excels/{request.pb_number}"
@@ -267,7 +267,7 @@ def get_unique_row(request: GetRows):
         logger.exception("Error retrieving unique column values")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-@app.post("/store_file")
+@app.post("/user/store-file")
 async def store_file(request: ExcelFileInput = Depends()):
     try:
         UPLOAD_DIR = f"uploaded_excels/{request.pb_number}"
@@ -299,7 +299,7 @@ async def store_file(request: ExcelFileInput = Depends()):
         print("Error during sending file:", e)
         return {"error": str(e)}
     
-@app.post("/send_file_names")
+@app.post("/user/files")
 async def send_file_names(request: NamesReq):
     try:
         folder_path = os.path.join("uploaded_excels", request.pb_number)
@@ -325,7 +325,7 @@ async def send_file_names(request: NamesReq):
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
-@app.post("/analytics")
+@app.post("/user/analytics")
 async def analyse(request: QueryRequestFile) -> Dict[Any, Any]:
     try:
         filename = request.file_name
@@ -395,7 +395,7 @@ async def system_info():
     }
 
 
-@app.post("/verify_query")
+@app.post("/user/verify-query")
 async def verify_query_endpoint(request: QueryRequest):
     """Verify query quality and relevance before processing."""
     is_valid, message, details = verify_prompt(request.query, context="aircraft")
@@ -408,7 +408,7 @@ async def verify_query_endpoint(request: QueryRequest):
     }
 
 
-@app.get("/index/statistics")
+@app.get("/admin/index/statistics")
 async def get_index_statistics():
     """Get statistics about the vector store index."""
     try:
@@ -471,7 +471,7 @@ async def add_document_to_index(
         )
 
 
-@app.get("/formats/supported")
+@app.get("/system/formats")
 async def get_supported_formats_endpoint():
     """Get list of supported document formats."""
     format_support = check_format_support()
