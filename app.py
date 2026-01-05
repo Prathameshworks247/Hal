@@ -710,4 +710,3 @@ async def admin_get_index_info(index_path: str = "snag_faiss_index"):
                 "error": str(e)
             }
         )
-

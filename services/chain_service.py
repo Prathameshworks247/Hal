@@ -58,15 +58,25 @@ CRITICAL ANTI-HALLUCINATION RULES:
 
 ---
 
-You will be provided with:
-- A **current aircraft snag report**
-- A list of **historical snag records with their corresponding rectifications** (each marked with source information)
+STEP 1: INTENT CLASSIFICATION
+First, classify the user's query into one of three categories:
+- **SNAG**: The query describes a specific malfunction, defect, or problem requiring rectification (e.g., "hydraulic pressure low", "engine oil leak")
+- **INSPECTION**: The query asks about inspection procedures, checklists, or preventive maintenance (e.g., "how to inspect landing gear", "pre-flight checklist")
+- **CONCEPTUAL**: The query asks for general knowledge, explanations, or theoretical information (e.g., "how does the hydraulic system work", "what is a pitot tube")
 
-Your job is to analyze the current snag **strictly using only the information provided in the historical records**.
+Identify the intent based on the question structure and content.
 
 ---
 
-VERIFICATION PROCESS:
+USER QUERY:
+{question}
+
+HISTORICAL RECORDS:
+{context}
+
+---
+
+STEP 2: VERIFICATION PROCESS
 Before responding, verify:
 1. Can I find direct evidence for each claim in the provided records?
 2. Am I inferring information not explicitly stated? (If yes, remove it)
@@ -74,15 +84,9 @@ Before responding, verify:
 
 ---
 
-CURRENT SNAG:
-{question}
+STEP 3: RESPOND ACCORDING TO INTENT
 
-HISTORICAL SNAG RECORDS:
-{context}
-
----
-
-RESPONSE FORMAT (follow exactly):
+**IF INTENT = SNAG:**
 
 1. **Most Likely Cause of the Issue**
    [State ONLY if directly evident from historical context. Cite source: "Based on Record [X]..."]
@@ -101,11 +105,47 @@ RESPONSE FORMAT (follow exactly):
    [List ONLY parts explicitly mentioned in similar past snags. Include record references.]
    [If none found: "No specific parts identified in historical records."]
 
+5. **Detailed Rectification Steps**
+   [Provide step-by-step procedures STRICTLY based on similar records. Cite record numbers.]
+   [If unclear: "INSUFFICIENT DATA IN HISTORICAL RECORDS TO PROVIDE DETAILED RECTIFICATION."]
+
 ---
 
-RECTIFICATION:
-[Provide detailed rectification steps STRICTLY based on similar records. For each step, indicate if it's directly from records or inferred (but prefer direct only).]
-[If unclear: "INSUFFICIENT DATA IN HISTORICAL RECORDS TO PROVIDE DETAILED RECTIFICATION. Please consult additional technical documentation."]
+**IF INTENT = INSPECTION:**
+
+1. **Inspection Type/Scope**
+   [Identify the type of inspection based on historical records. Cite sources.]
+
+2. **Inspection Procedures**
+   [List step-by-step procedures ONLY from historical records. Include record references.]
+   [If not found: "No specific inspection procedures found in historical records."]
+
+3. **Tools and Equipment Required**
+   [List ONLY equipment explicitly mentioned in records.]
+
+4. **Acceptance Criteria**
+   [State pass/fail criteria or tolerances ONLY if mentioned in records.]
+
+5. **Frequency/Intervals**
+   [Mention inspection intervals ONLY if stated in records.]
+
+---
+
+**IF INTENT = CONCEPTUAL:**
+
+1. **Explanation/Definition**
+   [Provide explanation using ONLY information from historical records.]
+   [If the concept is mentioned in maintenance contexts, explain based on those references.]
+
+2. **Related Components/Systems**
+   [List related systems ONLY if mentioned in the records. Cite sources.]
+
+3. **Operational Principles**
+   [Explain how it works ONLY based on information in the records.]
+   [If not found: "Detailed operational principles not available in historical records."]
+
+4. **Common Issues (if applicable)**
+   [Mention typical problems ONLY if they appear in historical snag records.]
 
 ---
 
@@ -170,8 +210,13 @@ CRITICAL ANTI-HALLUCINATION RULES:
 
 ---
 
-TASK:
-Answer the user's question using ONLY the information from the provided documents.
+STEP 1: INTENT CLASSIFICATION
+First, classify the user's query into one of three categories:
+- **SNAG**: The query describes a specific malfunction, defect, or problem requiring rectification
+- **INSPECTION**: The query asks about inspection procedures, checklists, or preventive maintenance
+- **CONCEPTUAL**: The query asks for general knowledge, explanations, or theoretical information
+
+---
 
 USER QUESTION:
 {question}
@@ -181,51 +226,89 @@ RELEVANT DOCUMENT EXCERPTS:
 
 ---
 
-INSTRUCTIONS:
-1. **Identify the question type:**
-   - If it's a maintenance/snag query → Provide rectification steps
-   - If it's a technical information query → Provide the requested information
-   - If it's a general question → Answer based on document content
+STEP 2: RESPOND ACCORDING TO INTENT
 
-2. **Answer format:**
-   - Start with a direct answer to the question
-   - Cite specific page numbers for each piece of information
-   - Use clear, structured formatting
-   - If the answer requires multiple points, use bullet points or numbered lists
+**IF INTENT = SNAG:**
 
-3. **Citation format:**
-   - "According to Page [X], ..."
-   - "As stated on Page [X], ..."
-   - "The document on Page [X] indicates that ..."
+**Problem Analysis:**
+[Describe the issue based on document information. Cite page numbers.]
 
-4. **If information is not available:**
-   - Clearly state: "This information is not available in the provided documents."
-   - Do NOT make up information
-   - Do NOT guess or infer beyond what's explicitly stated
+**Root Cause (if available):**
+[State cause ONLY if mentioned in documents.]
+
+**Rectification Steps:**
+[Provide step-by-step solution from documents. Cite pages.]
+
+**Parts/Tools Required:**
+[List ONLY if mentioned in documents.]
+
+**Safety Precautions:**
+[Include ONLY if stated in documents.]
+
+**Source Citations:**
+[List all pages referenced]
 
 ---
 
-RESPONSE STRUCTURE:
+**IF INTENT = INSPECTION:**
 
-**Answer:**
-[Provide a clear, direct answer to the user's question using information from the documents]
+**Inspection Overview:**
+[Describe the inspection scope based on documents. Cite page numbers.]
 
-**Detailed Information:**
-[Expand on the answer with relevant details, properly cited with page numbers]
+**Inspection Procedures:**
+[Provide step-by-step procedures from documents. Number each step.]
+
+**Tools and Equipment:**
+[List required tools ONLY if mentioned in documents.]
+
+**Acceptance Criteria:**
+[State pass/fail criteria ONLY if mentioned in documents.]
+
+**Inspection Frequency:**
+[Mention intervals ONLY if stated in documents.]
 
 **Source Citations:**
-[List all pages referenced: Page 3, Page 5, etc.]
+[List all pages referenced]
 
-**Additional Notes:**
-[Any relevant context or related information from the documents]
+---
+
+**IF INTENT = CONCEPTUAL:**
+
+**Concept Explanation:**
+[Provide clear explanation using information from documents. Cite page numbers.]
+
+**System/Component Description:**
+[Describe how it works based on document content.]
+
+**Key Principles:**
+[Explain operational principles ONLY if stated in documents.]
+
+**Relevant Applications:**
+[Mention practical applications ONLY if found in documents.]
+
+**Related Information:**
+[Include related concepts ONLY if mentioned in documents.]
+
+**Source Citations:**
+[List all pages referenced]
+
+---
+
+CITATION FORMAT:
+- "According to Page [X], ..."
+- "As stated on Page [X], ..."
+- "The document on Page [X] indicates that ..."
+
+IF INFORMATION NOT AVAILABLE:
+Clearly state: "This information is not available in the provided documents."
 
 ---
 
 FINAL CHECK: 
-- Have I answered the user's actual question?
+- Have I correctly identified the intent?
+- Have I answered according to the appropriate format?
 - Have I cited page numbers for all information?
 - Have I avoided making up information?
-- Is my response clear and helpful?
 """)
 
         vectorstore = FAISS.from_documents(
