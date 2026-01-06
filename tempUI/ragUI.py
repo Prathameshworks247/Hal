@@ -7,7 +7,7 @@ from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain.chains import RetrievalQA
 from langchain_core.prompts import PromptTemplate
-from llm import get_llm
+from services.llm import get_llm
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

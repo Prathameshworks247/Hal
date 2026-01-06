@@ -1,4 +1,4 @@
-hal
+hall
 .env
 All_snags_data.xlsx
 all-MiniLM-L6-v2
@@ -8,3 +8,6 @@ snag_faiss_index/index.faiss
 tempCodeRunnerFile.py
 confidential_snag.xlsx
 .DS_Store
+data
+uploaded_excels
+myenv
