@@ -1,6 +1,7 @@
 """
 Multi-format document ingestion service for building global FAISS index.
 Supports PDF, DOCX, TXT, XLS, XLSX with incremental learning capability.
+Includes multimodal support for text and image descriptions.
 """
 import os
 import logging
@@ -11,6 +12,11 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain.schema import Document
 from services.document_parser import parse_document, get_supported_formats
 from services.incremental_learning import IncrementalLearningManager, create_or_update_index
+from services.multimodal_embeddings import (
+    get_multimodal_embeddings,
+    validate_multimodal_documents,
+    MultimodalEmbeddingManager
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -19,7 +25,8 @@ logger = logging.getLogger(__name__)
 def ingest_single_file(
     file_path: str,
     index_path: str = "snag_faiss_index",
-    incremental: bool = True
+    incremental: bool = True,
+    use_ocr: bool = False
 ) -> dict:
     """
     Ingest a single file into the FAISS index.
@@ -42,10 +49,10 @@ def ingest_single_file(
         file_name = os.path.basename(file_path)
         file_ext = os.path.splitext(file_path)[1].lower()
         
-        logger.info(f"📄 Ingesting file: {file_name}")
+        logger.info(f"📄 Ingesting file: {file_name}" + (" (OCR mode)" if use_ocr else ""))
         
-        # Parse document
-        documents = parse_document(file_path)
+        # Parse document (with OCR if requested)
+        documents = parse_document(file_path, use_ocr=use_ocr)
         
         if not documents:
             return {
@@ -53,14 +60,17 @@ def ingest_single_file(
                 "error": f"No content extracted from {file_name}"
             }
         
-        logger.info(f"✓ Parsed {len(documents)} chunks from {file_name}")
+        # Validate multimodal documents
+        if not validate_multimodal_documents(documents):
+            logger.warning("Document validation found issues, but continuing with ingestion")
         
-        # Get embeddings model
-        model_path = "./all-MiniLM-L6-v2"
-        embeddings = HuggingFaceEmbeddings(
-            model_name=model_path,
-            model_kwargs={'device': 'cpu'}
-        )
+        # Get statistics
+        manager_temp = MultimodalEmbeddingManager()
+        stats = manager_temp.get_embedding_stats(documents)
+        logger.info(f"✓ Parsed {stats['total_documents']} chunks: {stats['text_chunks']} text, {stats['image_descriptions']} images")
+        
+        # Get multimodal embeddings model
+        embeddings = get_multimodal_embeddings(model_path="./all-MiniLM-L6-v2", device='cpu')
         
         # Create or update index
         success = create_or_update_index(
@@ -240,14 +250,17 @@ def rebuild_index_from_scratch(
                 "error": "No documents were successfully processed"
             }
         
-        logger.info(f"📊 Total documents collected: {len(all_documents)}")
+        # Validate multimodal documents
+        if not validate_multimodal_documents(all_documents):
+            logger.warning("Some documents have validation issues, but continuing with index building")
         
-        # Create embeddings
-        model_path = "./all-MiniLM-L6-v2"
-        embeddings = HuggingFaceEmbeddings(
-            model_name=model_path,
-            model_kwargs={'device': 'cpu'}
-        )
+        # Get statistics
+        manager_temp = MultimodalEmbeddingManager()
+        stats = manager_temp.get_embedding_stats(all_documents)
+        logger.info(f"📊 Total documents: {stats['total_documents']} ({stats['text_chunks']} text, {stats['image_descriptions']} images)")
+        
+        # Create multimodal embeddings
+        embeddings = get_multimodal_embeddings(model_path="./all-MiniLM-L6-v2", device='cpu')
         
         # Create new index
         logger.info("🔨 Building FAISS index...")

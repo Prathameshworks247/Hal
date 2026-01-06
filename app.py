@@ -292,8 +292,31 @@ async def store_file(request: ExcelFileInput = Depends()):
         with open(file_location, "wb") as buffer:
             shutil.copyfileobj(request.file.file, buffer)
 
+        # Handle OCR if PDF and is_scanned flag is set
+        ocr_status = None
+        if file_ext == '.pdf' and request.is_scanned:
+            from services.ocr_service import get_ocr_status
+            ocr_check = get_ocr_status()
+            if ocr_check["tesseract_installed"]:
+                logger.info(f"📄 Scanned PDF detected: {file_name} - OCR will be applied during parsing")
+                ocr_status = "OCR will be applied during indexing"
+            else:
+                logger.warning("Tesseract OCR not installed. Cannot process scanned PDF.")
+                ocr_status = "WARNING: Tesseract not installed - file saved but OCR unavailable"
+
+        response_data = {
+            "message": "File Uploaded Successfully",
+            "file_name": file_name,
+            "file_location": file_location,
+            "is_scanned": request.is_scanned,
+            "ocr_status": ocr_status
+        }
+        
         print("File Uploaded:", file_location)
-        return "File Uploaded Successfully"
+        if ocr_status:
+            print(f"OCR Status: {ocr_status}")
+            
+        return JSONResponse(content=response_data)
     except Exception as e:
         logger.exception("Error during sending file")
         print("Error during sending file:", e)
@@ -364,6 +387,59 @@ async def analyse(request: QueryRequestFile) -> Dict[Any, Any]:
 # ============================================================================
 # NEW ENDPOINTS FOR ENHANCED FEATURES
 # ============================================================================
+
+@app.get("/system/ocr-status")
+async def get_ocr_status_endpoint():
+    """Get OCR system status and check if Tesseract is installed."""
+    from services.ocr_service import get_ocr_status
+    
+    status = get_ocr_status()
+    return {
+        "ocr_available": status["tesseract_installed"],
+        "details": status,
+        "instructions": {
+            "linux": "sudo apt-get install tesseract-ocr",
+            "mac": "brew install tesseract",
+            "windows": "Download from: https://github.com/UB-Mannheim/tesseract/wiki"
+        }
+    }
+
+
+@app.post("/system/detect-scanned-pdf")
+async def detect_scanned_pdf_endpoint(file: UploadFile = File(...)):
+    """
+    Detect if an uploaded PDF is scanned (image-only) or has extractable text.
+    Helps users determine if they need to enable OCR mode.
+    """
+    from services.ocr_service import detect_scanned_pdf
+    import tempfile
+    
+    try:
+        # Save uploaded file temporarily
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+            content = await file.read()
+            temp_file.write(content)
+            temp_path = temp_file.name
+        
+        # Detect PDF type
+        is_scanned, detection_info = detect_scanned_pdf(temp_path)
+        
+        # Clean up
+        os.remove(temp_path)
+        
+        return {
+            "file_name": file.filename,
+            "is_scanned": is_scanned,
+            "recommendation": "Enable OCR mode when uploading" if is_scanned else "Use normal mode (no OCR needed)",
+            "detection_details": detection_info
+        }
+        
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
+
 
 @app.get("/system/info")
 async def system_info():
