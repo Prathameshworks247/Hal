@@ -79,4 +79,25 @@ matplotlib==3.7.1
 
 # Computer Vision (for shape detection feature)
 opencv-python==4.8.1.78
+
+# ============================================
+# MULTIMODAL RAG - Vision & Image Processing
+# ============================================
+
+# Vision Model (BLIP for image captioning)
 transformers>=4.30.0
+torch>=2.0.0  # Required by transformers
+torchvision>=0.15.0  # For image preprocessing
+
+# Image Processing
+Pillow>=10.0.0  # PIL for image loading and manipulation
+
+# OCR Support (optional but recommended)
+pytesseract>=0.3.10  # Python wrapper for Tesseract OCR
+# Note: Requires Tesseract binary installed on system
+# macOS: brew install tesseract
+# Ubuntu: sudo apt-get install tesseract-ocr
+# Windows: Download from https://github.com/UB-Mannheim/tesseract/wiki
+
+# Additional image utilities
+scikit-image>=0.21.0  # For advanced image preprocessing (optional)
