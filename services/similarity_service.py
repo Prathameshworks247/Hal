@@ -30,7 +30,8 @@ def get_similar_snags_with_metadata(db, query: str, k: int = 5) -> List[Dict[str
             record = {
                 'rank': i + 1,
                 'fields': key_values,
-                'metadata': doc.metadata
+                'metadata': doc.metadata,
+                'document': doc  # Add the actual document object for citation extraction
             }
             similar_snags.append(record)
 
@@ -80,7 +81,8 @@ def get_similar_records_with_metadata(db, query: str, k: int = 5) -> List[Dict[s
             record = {
                 'rank': i + 1,
                 'fields': key_values,
-                'metadata': doc.metadata
+                'metadata': doc.metadata,
+                'document': doc  # Add the actual document object for citation extraction
             }
 
             results.append(record)

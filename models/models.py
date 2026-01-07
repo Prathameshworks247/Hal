@@ -33,7 +33,9 @@ class ExcelFileInput:
     def __init__(
         self,
         file: UploadFile = File(...),
-        pb_number: str = Form(...)
+        pb_number: str = Form(...),
+        is_scanned: bool = Form(False)
     ):
         self.file = file
         self.pb_number = pb_number
+        self.is_scanned = is_scanned

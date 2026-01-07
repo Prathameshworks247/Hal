@@ -2,10 +2,19 @@
 from datetime import datetime
 import os
 import logging
-import cv2
-import numpy as np
-import os
 import io
+
+# NOTE: CV2 import disabled due to numpy/OpenCV compatibility issues on macOS
+# If you need OCR preprocessing, ensure compatible versions are installed:
+# pip install --upgrade numpy opencv-python-headless
+CV2_AVAILABLE = False
+# try:
+#     import cv2
+#     import numpy as np
+#     CV2_AVAILABLE = True
+# except ImportError:
+#     CV2_AVAILABLE = False
+#     logging.warning("OpenCV (cv2) not available. Some features may be limited.")
 import uuid
 import shutil
 from collections import defaultdict
@@ -27,17 +36,20 @@ from services.chain_service import get_chain, get_chain_file, verify
 from services.prompt_verifier import verify_prompt
 from services.citation_service import create_traceable_response, extract_citations_from_sources
 from services.document_parser import parse_document, get_supported_formats, check_format_support
+from services.pdf_citation_service import get_citations_for_session, get_citation_by_id
+from fastapi.responses import FileResponse
 from services.incremental_learning import IncrementalLearningManager, create_or_update_index
 from services.rbac_service import get_rbac_manager, Role, Permission
 from services.ingest import ingest_single_file, ingest_directory, rebuild_index_from_scratch, get_index_info
 from services.similarity_service import  get_similar_records_with_metadata
-from services.parsers import process_snag_query_json, display_results_as_json
+from services.parsers import process_snag_query_json, process_file_query_json, display_results_as_json
 from utils.utils import test_retriever, convert_numpy
 from services.chain_service import get_analytics_chain
 from services.parsers import process_snag_query_json_analysis
 from services.chain_service import get_analytics_chain_from_xls
 from services.similarity_service import has_semantic_meaning
-from vision.funcs import detect_shapes,get_pixels_per_mm,save_to_csv
+# DISABLED: vision.funcs uses cv2 which causes segfault on macOS
+# from vision.funcs import detect_shapes,get_pixels_per_mm,save_to_csv
 
 app = FastAPI(title="Aircraft AI API", description="")
 app.add_middleware(
@@ -200,17 +212,13 @@ async def rectification(request: QueryRequestFile) -> Dict[Any, Any]:
             return jsonable_encoder(convert_numpy(json_results))
 
         else:
+            # File-specific query with citation extraction
+            print(f"📄 Processing file-specific query for: {file_name}")
             chain, db = get_chain_file_chached(file_name, pb_number)
-            response = chain.invoke({"question": final_query})
-
-        # Extract result
-            if isinstance(response, dict):
-                rectification = response.get('result', response.get('answer', str(response)))
-            else:
-                rectification = str(response)
             
-            similar_snags = get_similar_records_with_metadata(db, final_query, k=5)
-            json_results = display_results_as_json(rectification, similar_snags, final_query)
+            print("🔍 Final LLM Query:\n", final_query)
+            
+            json_results = process_file_query_json(chain, db, final_query)
             
             return jsonable_encoder(convert_numpy(json_results))
 
@@ -241,6 +249,194 @@ async def rectification(request: QueryRequestFile) -> Dict[Any, Any]:
 #         logger.exception("Error during rectification")
 #         return {"error": str(e)}
 
+
+
+@app.post("/user/query-pdf-images")
+async def query_pdf_images(request: QueryRequest) -> Dict[Any, Any]:
+    """
+    Query specifically for images extracted from PDFs in the knowledge base.
+    Returns only image descriptions with their source PDF information.
+    
+    Args:
+        query: Text query to search image descriptions
+    
+    Returns:
+        JSON response with matching images and their descriptions
+    """
+    try:
+        query = request.query
+        logger.info(f"Querying PDF images with: {query}")
+        
+        # Get vector store
+        chain, db = get_chain_cached()
+        
+        # Search for similar documents (including images)
+        docs_with_scores = db.similarity_search_with_score(query, k=20)
+        
+        # Filter for only image descriptions
+        image_results = []
+        for doc, score in docs_with_scores:
+            metadata = doc.metadata
+            
+            # Only include image descriptions
+            if metadata.get("type") == "image_description":
+                image_results.append({
+                    "description": doc.page_content,
+                    "similarity_score": float(1 - score),  # Convert distance to similarity
+                    "source": {
+                        "file": metadata.get("source", "unknown"),
+                        "file_path": metadata.get("file_path", ""),
+                        "page": metadata.get("page_number", 0),
+                        "image_index": metadata.get("image_index", 0),
+                        "image_format": metadata.get("image_format", "unknown")
+                    },
+                    "metadata": {
+                        "authoritative": metadata.get("authoritative", False),
+                        "confidence": metadata.get("confidence", "unknown"),
+                        "citation": metadata.get("citation", "")
+                    }
+                })
+        
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "query": query,
+            "status": "success",
+            "total_images_found": len(image_results),
+            "images": image_results[:10]  # Return top 10
+        }
+        
+    except Exception as e:
+        logger.exception(f"Error querying PDF images: {str(e)}")
+        return {
+            "error": str(e),
+            "status": "failed",
+            "timestamp": datetime.now().isoformat()
+        }
+
+
+@app.get("/user/pdf-images/{filename}")
+async def get_pdf_images(filename: str, pb_number: str = "default") -> Dict[Any, Any]:
+    """
+    Get all images extracted from a specific PDF.
+    
+    Args:
+        filename: PDF filename
+        pb_number: User/project identifier
+    
+    Returns:
+        List of all images with descriptions from the PDF
+    """
+    try:
+        logger.info(f"Getting images from PDF: {filename}")
+        
+        # Get vector store
+        chain, db = get_chain_cached()
+        
+        # Get all documents from the index
+        # We'll use a broad search and filter by filename
+        all_docs = db.similarity_search("*", k=1000)  # Get many docs
+        
+        # Filter for images from this specific PDF
+        pdf_images = []
+        for doc in all_docs:
+            metadata = doc.metadata
+            
+            if (metadata.get("type") == "image_description" and 
+                metadata.get("source", "").startswith(filename.split('.')[0])):
+                
+                pdf_images.append({
+                    "description": doc.page_content,
+                    "page": metadata.get("page_number", 0),
+                    "image_index": metadata.get("image_index", 0),
+                    "image_format": metadata.get("image_format", "unknown"),
+                    "source": {
+                        "file": metadata.get("source", "unknown"),
+                        "file_path": metadata.get("file_path", ""),
+                        "citation": metadata.get("citation", "")
+                    }
+                })
+        
+        # Sort by page and image index
+        pdf_images.sort(key=lambda x: (x["page"], x["image_index"]))
+        
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "filename": filename,
+            "pb_number": pb_number,
+            "status": "success",
+            "total_images": len(pdf_images),
+            "images": pdf_images
+        }
+        
+    except Exception as e:
+        logger.exception(f"Error getting PDF images: {str(e)}")
+        return {
+            "error": str(e),
+            "status": "failed",
+            "timestamp": datetime.now().isoformat()
+        }
+
+
+@app.post("/user/query-image")
+async def query_image(
+    image: UploadFile = File(...),
+    query: str = Form(...),
+    pb_number: str = Form("default")
+) -> Dict[Any, Any]:
+    """
+    Query using an uploaded image. The image is analyzed by BLIP vision model
+    and the description is used to search the knowledge base.
+    
+    Args:
+        image: Image file (JPG, PNG, etc.)
+        query: Optional text query to combine with image
+        pb_number: User/project identifier
+    
+    Returns:
+        JSON response with image description and relevant documents
+    """
+    try:
+        logger.info(f"Received image query: {image.filename}")
+        
+        # Read image data
+        image_data = await image.read()
+        
+        # Generate image description using BLIP
+        from services.document_parser import _generate_image_description
+        
+        logger.info("Generating image description with BLIP...")
+        image_description = _generate_image_description(
+            image_data,
+            image.filename.split('.')[-1].upper() if '.' in image.filename else "PNG"
+        )
+        
+        logger.info(f"Image description: {image_description}")
+        
+        # Combine image description with text query
+        combined_query = f"{query}\n\nImage content: {image_description}" if query else image_description
+        
+        # Query the knowledge base
+        chain, db = get_chain_cached()
+        
+        logger.info(f"Querying knowledge base with: {combined_query}")
+        json_results = process_snag_query_json(chain, db, combined_query)
+        
+        # Add image description to response
+        json_results["image_analysis"] = {
+            "filename": image.filename,
+            "description": image_description,
+            "combined_query": combined_query
+        }
+        
+        return jsonable_encoder(convert_numpy(json_results))
+        
+    except Exception as e:
+        logger.exception(f"Error processing image query: {str(e)}")
+        return {
+            "error": str(e),
+            "status": "failed",
+            "timestamp": datetime.now().isoformat()
+        }
 
     
 @app.post("/user/file-columns", response_model=Dict[str, List[str]])
@@ -292,8 +488,31 @@ async def store_file(request: ExcelFileInput = Depends()):
         with open(file_location, "wb") as buffer:
             shutil.copyfileobj(request.file.file, buffer)
 
+        # Handle OCR if PDF and is_scanned flag is set
+        ocr_status = None
+        if file_ext == '.pdf' and request.is_scanned:
+            from services.ocr_service import get_ocr_status
+            ocr_check = get_ocr_status()
+            if ocr_check["tesseract_installed"]:
+                logger.info(f"📄 Scanned PDF detected: {file_name} - OCR will be applied during parsing")
+                ocr_status = "OCR will be applied during indexing"
+            else:
+                logger.warning("Tesseract OCR not installed. Cannot process scanned PDF.")
+                ocr_status = "WARNING: Tesseract not installed - file saved but OCR unavailable"
+
+        response_data = {
+            "message": "File Uploaded Successfully",
+            "file_name": file_name,
+            "file_location": file_location,
+            "is_scanned": request.is_scanned,
+            "ocr_status": ocr_status
+        }
+        
         print("File Uploaded:", file_location)
-        return "File Uploaded Successfully"
+        if ocr_status:
+            print(f"OCR Status: {ocr_status}")
+            
+        return JSONResponse(content=response_data)
     except Exception as e:
         logger.exception("Error during sending file")
         print("Error during sending file:", e)
@@ -364,6 +583,59 @@ async def analyse(request: QueryRequestFile) -> Dict[Any, Any]:
 # ============================================================================
 # NEW ENDPOINTS FOR ENHANCED FEATURES
 # ============================================================================
+
+@app.get("/system/ocr-status")
+async def get_ocr_status_endpoint():
+    """Get OCR system status and check if Tesseract is installed."""
+    from services.ocr_service import get_ocr_status
+    
+    status = get_ocr_status()
+    return {
+        "ocr_available": status["tesseract_installed"],
+        "details": status,
+        "instructions": {
+            "linux": "sudo apt-get install tesseract-ocr",
+            "mac": "brew install tesseract",
+            "windows": "Download from: https://github.com/UB-Mannheim/tesseract/wiki"
+        }
+    }
+
+
+@app.post("/system/detect-scanned-pdf")
+async def detect_scanned_pdf_endpoint(file: UploadFile = File(...)):
+    """
+    Detect if an uploaded PDF is scanned (image-only) or has extractable text.
+    Helps users determine if they need to enable OCR mode.
+    """
+    from services.ocr_service import detect_scanned_pdf
+    import tempfile
+    
+    try:
+        # Save uploaded file temporarily
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+            content = await file.read()
+            temp_file.write(content)
+            temp_path = temp_file.name
+        
+        # Detect PDF type
+        is_scanned, detection_info = detect_scanned_pdf(temp_path)
+        
+        # Clean up
+        os.remove(temp_path)
+        
+        return {
+            "file_name": file.filename,
+            "is_scanned": is_scanned,
+            "recommendation": "Enable OCR mode when uploading" if is_scanned else "Use normal mode (no OCR needed)",
+            "detection_details": detection_info
+        }
+        
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
+
 
 @app.get("/system/info")
 async def system_info():
@@ -675,6 +947,123 @@ async def admin_rebuild_index(
                 "success": False,
                 "error": str(e)
             }
+        )
+
+
+@app.get("/pdfs/{filename}")
+async def serve_pdf(filename: str):
+    """
+    Serve PDF files for citation viewing.
+    Searches in uploaded_excels directories and data directory.
+    """
+    # Search in common locations
+    search_paths = [
+        f"data/pdfs/{filename}",
+        f"uploaded_excels/**/{filename}",
+    ]
+    
+    # Also search in all pb_number directories
+    for pb_dir in os.listdir("uploaded_excels"):
+        pdf_path = f"uploaded_excels/{pb_dir}/{filename}"
+        if os.path.exists(pdf_path):
+            return FileResponse(
+                pdf_path,
+                media_type="application/pdf",
+                filename=filename
+            )
+    
+    # Check data/pdfs
+    pdf_path = f"data/pdfs/{filename}"
+    if os.path.exists(pdf_path):
+        return FileResponse(
+            pdf_path,
+            media_type="application/pdf",
+            filename=filename
+        )
+    
+    raise HTTPException(status_code=404, detail=f"PDF file not found: {filename}")
+
+
+@app.get("/api/citation/{citation_id}")
+async def get_citation_details(citation_id: str, session_id: str = None):
+    """
+    Get detailed citation information by citation ID.
+    Used when user clicks a citation in the UI.
+    
+    Args:
+        citation_id: Citation ID (e.g., "cite_1")
+        session_id: Optional session ID to filter citations
+    
+    Returns:
+        Citation details with PDF coordinates
+    """
+    try:
+        # If session_id provided, get citations from that session
+        if session_id:
+            citations = get_citations_for_session(session_id)
+            citation = get_citation_by_id(citation_id, citations)
+            
+            if citation:
+                # Add file_url for serving
+                filename = citation["source"]["file"]
+                citation["source"]["file_url"] = f"/pdfs/{filename}"
+                return citation
+        
+        # Fallback: return error
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": f"Citation {citation_id} not found",
+                "session_id": session_id
+            }
+        )
+        
+    except Exception as e:
+        logger.exception("Error retrieving citation details")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
+
+
+@app.post("/api/test-pdf-bbox")
+async def test_pdf_bbox_extraction(
+    file: UploadFile = File(...),
+    page_num: int = Form(...),
+    search_text: str = Form(...)
+):
+    """
+    Test endpoint to verify PDF bbox extraction works.
+    Upload a PDF and test text location finding.
+    """
+    from services.pdf_citation_service import test_bbox_extraction
+    import tempfile
+    
+    try:
+        # Save uploaded file temporarily
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+            content = await file.read()
+            temp_file.write(content)
+            temp_path = temp_file.name
+        
+        # Test bbox extraction
+        results = test_bbox_extraction(temp_path, page_num, search_text)
+        
+        # Clean up
+        os.remove(temp_path)
+        
+        return {
+            "file_name": file.filename,
+            "page_number": page_num,
+            "search_text": search_text,
+            "results": results,
+            "bbox_found": results["bbox"] is not None
+        }
+        
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
         )
 
 

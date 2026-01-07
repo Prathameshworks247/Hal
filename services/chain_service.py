@@ -11,6 +11,7 @@ import logging
 from langchain.chains import LLMChain
 from services.excel_service import excel_to_documents
 from services.document_parser import parse_document
+from services.multimodal_embeddings import get_multimodal_embeddings
 
 logger = logging.getLogger(__name__)
 
@@ -22,11 +23,8 @@ def get_chain():
             logger.warning(f"Local model path {model_path} not found.")
             return
         
-        embeddings = HuggingFaceEmbeddings(
-            model_name=model_path,
-            model_kwargs={'device': 'cpu'} 
-        )
-        logger.info("Embeddings model loaded successfully.")
+        embeddings = get_multimodal_embeddings(model_path=model_path, device='cpu')
+        logger.info("Multimodal embeddings model loaded successfully.")
 
         logger.info("Loading FAISS index...")
         # Check if FAISS index exists
@@ -177,7 +175,7 @@ FINAL CHECK: Review your response and remove any information not directly suppor
         raise
 
 
-def get_chain_file(file_name, pb_number):
+def get_chain_file(file_name, pb_number, use_ocr=False):
     try:
         UPLOAD_DIR = f"uploaded_excels/{pb_number}"
         file_location = os.path.join(UPLOAD_DIR, file_name)
@@ -187,16 +185,13 @@ def get_chain_file(file_name, pb_number):
         if file_ext in ['.xlsx', '.xls']:
             docs = excel_to_documents(file_location)  # Use existing Excel parser for backward compatibility
         else:
-            docs = parse_document(file_location)  # Use new multi-format parser
+            docs = parse_document(file_location, use_ocr=use_ocr)  # Use new multi-format parser with OCR support
         
         print(docs[:20])
         if not docs:
             return {"error": "No relevant historical snag records found."}
         model_path = "./all-MiniLM-L6-v2"
-        embeddings = HuggingFaceEmbeddings(
-            model_name=model_path,
-            model_kwargs={"device": "cpu"}
-        )
+        embeddings = get_multimodal_embeddings(model_path=model_path, device="cpu")
 
         prompt = PromptTemplate.from_template("""
 You are an expert aircraft technician and technical documentation assistant with extensive knowledge of aircraft systems, maintenance, and construction.
@@ -348,11 +343,8 @@ def get_analytics_chain():
             logger.warning(f"Local model path {model_path} not found.")
             return
         
-        embeddings = HuggingFaceEmbeddings(
-            model_name=model_path,
-            model_kwargs={'device': 'cpu'} 
-        )
-        logger.info("Embeddings model loaded successfully.")
+        embeddings = get_multimodal_embeddings(model_path=model_path, device='cpu')
+        logger.info("Multimodal embeddings model loaded successfully.")
 
         logger.info("Loading FAISS index...")
         # Check if FAISS index exists
@@ -467,7 +459,7 @@ IMPORTANT:
     
 
 
-def get_analytics_chain_from_xls(file_name, pb_number):
+def get_analytics_chain_from_xls(file_name, pb_number, use_ocr=False):
     try:
         logger.info("Initializing embeddings model...")
         model_path = "./all-MiniLM-L6-v2"
@@ -488,7 +480,7 @@ def get_analytics_chain_from_xls(file_name, pb_number):
         if file_ext in ['.xlsx', '.xls']:
             docs = excel_to_documents(file_location)  # Use existing Excel parser for backward compatibility
         else:
-            docs = parse_document(file_location)  # Use new multi-format parser
+            docs = parse_document(file_location, use_ocr=use_ocr)  # Use new multi-format parser with OCR support
 
         logger.info("Building FAISS index in-memory...")
         db = FAISS.from_documents(docs, embedding=embeddings)
