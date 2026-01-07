@@ -175,7 +175,7 @@ def parse_pdf(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200, 
                     for image_bytes, image_meta in page_images:
                         try:
                             # Generate image description using vision model (stub for now)
-                            image_description = _generate_image_description_stub(
+                            image_description = _generate_image_description(
                                 image_bytes, 
                                 image_meta.get("format", "PNG")
                             )
@@ -269,40 +269,40 @@ def parse_docx(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200)
                         "citation": f"{file_name}, Paragraph ~{start_para}"
                     }
                 ))
-        
-        # Rule 2 & 3: Extract images from DOCX and pass to vision model
-        docx_images = _extract_images_from_docx(file_path)
-        
-        # Rule 4 & 5: Store each image description as separate Document with metadata
-        for image_bytes, image_meta in docx_images:
-            try:
-                # Generate image description using vision model (stub for now)
-                image_description = _generate_image_description_stub(
-                    image_bytes,
-                    image_meta.get("format", "PNG")
-                )
-                
-                # Create separate Document for image description (non-authoritative)
-                documents.append(Document(
-                    page_content=image_description,
-                    metadata={
-                        "type": "image_description",
-                        "authoritative": False,
-                        "confidence": "low",
-                        "page_number": 0,  # DOCX doesn't have pages
-                        "source": file_name,
-                        "file_path": file_path,
-                        "image_index": image_meta.get("image_index", 0),
-                        "image_format": image_meta.get("format", "unknown"),
-                        "image_path": image_meta.get("image_path", ""),
-                        "file_type": "docx",
-                        "ingestion_timestamp": datetime.now().isoformat(),
-                        "citation": f"{file_name}, Image {image_meta.get('image_index', 0) + 1} (non-authoritative)"
-                    }
-                ))
-            except Exception as e:
-                logger.warning(f"Failed to generate description for image {image_meta.get('image_index', 0)}: {str(e)}")
-                continue
+            
+            # Rule 2 & 3: Extract images from DOCX and pass to vision model
+            docx_images = _extract_images_from_docx(file_path)
+            
+            # Rule 4 & 5: Store each image description as separate Document with metadata
+            for image_bytes, image_meta in docx_images:
+                try:
+                    # Generate image description using vision model
+                    image_description = _generate_image_description(
+                        image_bytes,
+                        image_meta.get("format", "PNG")
+                    )
+                    
+                    # Create separate Document for image description (non-authoritative)
+                    documents.append(Document(
+                        page_content=image_description,
+                        metadata={
+                            "type": "image_description",
+                            "authoritative": False,
+                            "confidence": "low",
+                            "page_number": 0,  # DOCX doesn't have pages
+                            "source": file_name,
+                            "file_path": file_path,
+                            "image_index": image_meta.get("image_index", 0),
+                            "image_format": image_meta.get("format", "unknown"),
+                            "image_path": image_meta.get("image_path", ""),
+                            "file_type": "docx",
+                            "ingestion_timestamp": datetime.now().isoformat(),
+                            "citation": f"{file_name}, Image {image_meta.get('image_index', 0) + 1} (non-authoritative)"
+                        }
+                    ))
+                except Exception as e:
+                    logger.warning(f"Failed to generate description for image {image_meta.get('image_index', 0)}: {str(e)}")
+                    continue
         
         text_chunks = len([d for d in documents if d.metadata.get("type") != "image_description"])
         image_chunks = len([d for d in documents if d.metadata.get("type") == "image_description"])
@@ -497,46 +497,86 @@ def check_format_support() -> Dict[str, bool]:
 
 # Helper functions for multimodal support
 
-def _generate_image_description_stub(image_data: bytes, image_format: str = "PNG") -> str:
+# Vision model initialization (lazy loading)
+_vision_model = None
+_vision_processor = None
+VISION_MODEL_AVAILABLE = False
+
+def _initialize_vision_model():
     """
-    Generate description of an image using a vision model (STUB).
+    Initialize BLIP vision model for image captioning (lazy loading).
+    Model is loaded only once and cached for reuse.
+    """
+    global _vision_model, _vision_processor, VISION_MODEL_AVAILABLE
     
-    This is a placeholder function that will be replaced with actual vision model.
-    Integration options:
-    - BLIP (Salesforce/blip-image-captioning-base)
-    - CLIP + GPT for descriptions
-    - Qwen-VL or MiniCPM-V for detailed descriptions
-    - GPT-4 Vision API (online)
+    if _vision_model is not None:
+        return True
+    
+    try:
+        from transformers import BlipProcessor, BlipForConditionalGeneration
+        
+        logger.info("Loading BLIP vision model (first time only)...")
+        _vision_processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
+        _vision_model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
+        VISION_MODEL_AVAILABLE = True
+        logger.info("✓ BLIP vision model loaded successfully")
+        return True
+        
+    except ImportError:
+        logger.warning("transformers not available. Install: pip install transformers")
+        VISION_MODEL_AVAILABLE = False
+        return False
+    except Exception as e:
+        logger.warning(f"Failed to load vision model: {str(e)}")
+        VISION_MODEL_AVAILABLE = False
+        return False
+
+
+def _generate_image_description(image_data: bytes, image_format: str = "PNG") -> str:
+    """
+    Generate description of an image using BLIP vision model.
+    Falls back to placeholder if model unavailable.
     
     Args:
         image_data: Raw image bytes
         image_format: Image format (PNG, JPEG, etc.)
     
     Returns:
-        Text description of the image (currently placeholder)
+        Text description of the image
     """
-    # TODO: Replace with actual vision model integration
-    # Example BLIP integration (commented out):
-    # from transformers import BlipProcessor, BlipForConditionalGeneration
-    # processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
-    # model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
-    # image = Image.open(io.BytesIO(image_data))
-    # inputs = processor(image, return_tensors="pt")
-    # out = model.generate(**inputs)
-    # description = processor.decode(out[0], skip_special_tokens=True)
-    # return description
-    
     try:
-        if PIL_AVAILABLE:
-            image = Image.open(io.BytesIO(image_data))
-            width, height = image.size
-            mode = image.mode
-            return f"[Vision model placeholder] Image detected: {width}x{height}px, {mode} mode, format: {image_format}"
+        if not PIL_AVAILABLE:
+            return f"[Vision unavailable] Image detected, format: {image_format}"
+        
+        # Open image
+        image = Image.open(io.BytesIO(image_data))
+        width, height = image.size
+        
+        # Try to use BLIP model
+        if _initialize_vision_model():
+            try:
+                # Convert to RGB if needed (BLIP requires RGB)
+                if image.mode != 'RGB':
+                    image = image.convert('RGB')
+                
+                # Generate caption
+                inputs = _vision_processor(image, return_tensors="pt")
+                outputs = _vision_model.generate(**inputs, max_length=50)
+                description = _vision_processor.decode(outputs[0], skip_special_tokens=True)
+                
+                logger.debug(f"Generated image description: {description}")
+                return f"Image shows: {description} ({width}x{height}px)"
+                
+            except Exception as e:
+                logger.warning(f"Vision model inference failed: {str(e)}")
+                return f"Image detected: {width}x{height}px, {image.mode} mode (caption failed)"
         else:
-            return f"[Vision model placeholder] Image detected, format: {image_format}"
+            # Fallback to placeholder
+            return f"[Vision model unavailable] Image: {width}x{height}px, {image.mode} mode"
+            
     except Exception as e:
         logger.warning(f"Error analyzing image: {str(e)}")
-        return f"[Vision model placeholder] Image analysis failed: {str(e)}"
+        return f"[Vision error] Image analysis failed: {str(e)}"
 
 
 def _extract_images_from_pdf_page(page, page_num: int, file_name: str) -> List[Tuple[bytes, Dict[str, Any]]]:

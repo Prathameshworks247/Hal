@@ -79,3 +79,4 @@ matplotlib==3.7.1
 
 # Computer Vision (for shape detection feature)
 opencv-python==4.8.1.78
+transformers>=4.30.0

@@ -250,6 +250,194 @@ async def rectification(request: QueryRequestFile) -> Dict[Any, Any]:
 #         return {"error": str(e)}
 
 
+
+@app.post("/user/query-pdf-images")
+async def query_pdf_images(request: QueryRequest) -> Dict[Any, Any]:
+    """
+    Query specifically for images extracted from PDFs in the knowledge base.
+    Returns only image descriptions with their source PDF information.
+    
+    Args:
+        query: Text query to search image descriptions
+    
+    Returns:
+        JSON response with matching images and their descriptions
+    """
+    try:
+        query = request.query
+        logger.info(f"Querying PDF images with: {query}")
+        
+        # Get vector store
+        chain, db = get_chain_cached()
+        
+        # Search for similar documents (including images)
+        docs_with_scores = db.similarity_search_with_score(query, k=20)
+        
+        # Filter for only image descriptions
+        image_results = []
+        for doc, score in docs_with_scores:
+            metadata = doc.metadata
+            
+            # Only include image descriptions
+            if metadata.get("type") == "image_description":
+                image_results.append({
+                    "description": doc.page_content,
+                    "similarity_score": float(1 - score),  # Convert distance to similarity
+                    "source": {
+                        "file": metadata.get("source", "unknown"),
+                        "file_path": metadata.get("file_path", ""),
+                        "page": metadata.get("page_number", 0),
+                        "image_index": metadata.get("image_index", 0),
+                        "image_format": metadata.get("image_format", "unknown")
+                    },
+                    "metadata": {
+                        "authoritative": metadata.get("authoritative", False),
+                        "confidence": metadata.get("confidence", "unknown"),
+                        "citation": metadata.get("citation", "")
+                    }
+                })
+        
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "query": query,
+            "status": "success",
+            "total_images_found": len(image_results),
+            "images": image_results[:10]  # Return top 10
+        }
+        
+    except Exception as e:
+        logger.exception(f"Error querying PDF images: {str(e)}")
+        return {
+            "error": str(e),
+            "status": "failed",
+            "timestamp": datetime.now().isoformat()
+        }
+
+
+@app.get("/user/pdf-images/{filename}")
+async def get_pdf_images(filename: str, pb_number: str = "default") -> Dict[Any, Any]:
+    """
+    Get all images extracted from a specific PDF.
+    
+    Args:
+        filename: PDF filename
+        pb_number: User/project identifier
+    
+    Returns:
+        List of all images with descriptions from the PDF
+    """
+    try:
+        logger.info(f"Getting images from PDF: {filename}")
+        
+        # Get vector store
+        chain, db = get_chain_cached()
+        
+        # Get all documents from the index
+        # We'll use a broad search and filter by filename
+        all_docs = db.similarity_search("*", k=1000)  # Get many docs
+        
+        # Filter for images from this specific PDF
+        pdf_images = []
+        for doc in all_docs:
+            metadata = doc.metadata
+            
+            if (metadata.get("type") == "image_description" and 
+                metadata.get("source", "").startswith(filename.split('.')[0])):
+                
+                pdf_images.append({
+                    "description": doc.page_content,
+                    "page": metadata.get("page_number", 0),
+                    "image_index": metadata.get("image_index", 0),
+                    "image_format": metadata.get("image_format", "unknown"),
+                    "source": {
+                        "file": metadata.get("source", "unknown"),
+                        "file_path": metadata.get("file_path", ""),
+                        "citation": metadata.get("citation", "")
+                    }
+                })
+        
+        # Sort by page and image index
+        pdf_images.sort(key=lambda x: (x["page"], x["image_index"]))
+        
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "filename": filename,
+            "pb_number": pb_number,
+            "status": "success",
+            "total_images": len(pdf_images),
+            "images": pdf_images
+        }
+        
+    except Exception as e:
+        logger.exception(f"Error getting PDF images: {str(e)}")
+        return {
+            "error": str(e),
+            "status": "failed",
+            "timestamp": datetime.now().isoformat()
+        }
+
+
+@app.post("/user/query-image")
+async def query_image(
+    image: UploadFile = File(...),
+    query: str = Form(...),
+    pb_number: str = Form("default")
+) -> Dict[Any, Any]:
+    """
+    Query using an uploaded image. The image is analyzed by BLIP vision model
+    and the description is used to search the knowledge base.
+    
+    Args:
+        image: Image file (JPG, PNG, etc.)
+        query: Optional text query to combine with image
+        pb_number: User/project identifier
+    
+    Returns:
+        JSON response with image description and relevant documents
+    """
+    try:
+        logger.info(f"Received image query: {image.filename}")
+        
+        # Read image data
+        image_data = await image.read()
+        
+        # Generate image description using BLIP
+        from services.document_parser import _generate_image_description
+        
+        logger.info("Generating image description with BLIP...")
+        image_description = _generate_image_description(
+            image_data,
+            image.filename.split('.')[-1].upper() if '.' in image.filename else "PNG"
+        )
+        
+        logger.info(f"Image description: {image_description}")
+        
+        # Combine image description with text query
+        combined_query = f"{query}\n\nImage content: {image_description}" if query else image_description
+        
+        # Query the knowledge base
+        chain, db = get_chain_cached()
+        
+        logger.info(f"Querying knowledge base with: {combined_query}")
+        json_results = process_snag_query_json(chain, db, combined_query)
+        
+        # Add image description to response
+        json_results["image_analysis"] = {
+            "filename": image.filename,
+            "description": image_description,
+            "combined_query": combined_query
+        }
+        
+        return jsonable_encoder(convert_numpy(json_results))
+        
+    except Exception as e:
+        logger.exception(f"Error processing image query: {str(e)}")
+        return {
+            "error": str(e),
+            "status": "failed",
+            "timestamp": datetime.now().isoformat()
+        }
+
     
 @app.post("/user/file-columns", response_model=Dict[str, List[str]])
 def get_unique_row(request: GetRows):
