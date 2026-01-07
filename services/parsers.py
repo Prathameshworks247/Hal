@@ -9,12 +9,36 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
-def process_snag_query_json(chain, db, query: str) -> Dict[str, Any]:
+def process_snag_query_json(chain, db, search_query: str, user_query: str = None, conversation_context: dict = None) -> Dict[str, Any]:
+    """
+    Process snag query with optional conversation context.
+    
+    Args:
+        chain: QA chain
+        db: Vector database
+        search_query: Query optimized for RAG retrieval
+        user_query: Original user query (for display)
+        conversation_context: Conversation history context
+    """
     try:
-        logger.info(f"Processing query: {query}")
+        # Use search_query for retrieval, user_query for display
+        if user_query is None:
+            user_query = search_query
+            
+        logger.info(f"Processing query: {user_query}")
+        if conversation_context and conversation_context.get('has_context'):
+            logger.info(f"  With conversation context: {conversation_context.get('context_summary')}")
         
-        # Get AI-generated rectification
-        response = chain.invoke({"question": query})
+        # Build enhanced query with conversation context
+        if conversation_context and conversation_context.get('has_context'):
+            # Prepend conversation context to help LLM understand references
+            context_prefix = f"[Conversation Context: {conversation_context['full_context']}]\n\nCurrent Question: "
+            llm_query = context_prefix + user_query
+        else:
+            llm_query = user_query
+        
+        # Get AI-generated rectification (use search_query for retrieval)
+        response = chain.invoke({"question": llm_query})
         
         # Extract result and source documents
         if isinstance(response, dict):
@@ -24,8 +48,8 @@ def process_snag_query_json(chain, db, query: str) -> Dict[str, Any]:
             rectification = str(response)
             source_documents = []
         
-        # Get similar snags with metadata
-        similar_snags = get_similar_snags_with_metadata(db, query, k=5)
+        # Get similar snags with metadata (use search_query for better retrieval)
+        similar_snags = get_similar_snags_with_metadata(db, search_query, k=5)
         
         # Extract PDF citations with bbox coordinates
         # Use source_documents if available, otherwise extract from similar_snags
@@ -40,15 +64,27 @@ def process_snag_query_json(chain, db, query: str) -> Dict[str, Any]:
             ]
         
         logger.info(f"Extracting PDF citations from {len(docs_for_citation)} documents")
-        pdf_citations = extract_citations_from_retrieved_docs(docs_for_citation, query)
+        pdf_citations = extract_citations_from_retrieved_docs(docs_for_citation, user_query)
         logger.info(f"Extracted {len(pdf_citations)} PDF citations")
         
         # Generate session ID for citation storage
         session_id = str(uuid.uuid4())
         store_citations(session_id, pdf_citations)
 
-        # Format as JSON
-        json_results = display_results_as_json(rectification, similar_snags, query, pdf_citations, session_id)
+        # Format as JSON (use user_query for display)
+        json_results = display_results_as_json(rectification, similar_snags, user_query, pdf_citations, session_id)
+        
+        # Add conversation context to response if available
+        if conversation_context and conversation_context.get('has_context'):
+            json_results["conversation_context"] = {
+                "has_history": True,
+                "history_length": conversation_context.get('history_length', 0),
+                "context_used": conversation_context.get('context_summary')
+            }
+        else:
+            json_results["conversation_context"] = {
+                "has_history": False
+            }
         
         return json_results
         
@@ -99,23 +135,37 @@ def display_results_as_json(response_text: str, similar_snags: List[Dict[str, An
 
     return results
 
-def process_file_query_json(chain, db, query: str) -> Dict[str, Any]:
+def process_file_query_json(chain, db, search_query: str, user_query: str = None, conversation_context: dict = None) -> Dict[str, Any]:
     """
     Process file-specific query and return results with PDF citations
     
     Args:
         chain: QA chain instance
         db: FAISS database instance
-        query: User query
+        search_query: Query optimized for RAG retrieval
+        user_query: Original user query (for display)
+        conversation_context: Conversation history context
         
     Returns:
         Complete JSON response with rectification, similar snags, and citations
     """
     try:
-        logger.info(f"Processing file query: {query}")
+        if user_query is None:
+            user_query = search_query
+            
+        logger.info(f"Processing file query: {user_query}")
+        if conversation_context and conversation_context.get('has_context'):
+            logger.info(f"  With conversation context: {conversation_context.get('context_summary')}")
         
-        # Get AI-generated rectification
-        response = chain.invoke({"question": query})
+        # Build enhanced query with conversation context
+        if conversation_context and conversation_context.get('has_context'):
+            context_prefix = f"[Conversation Context: {conversation_context['full_context']}]\n\nCurrent Question: "
+            llm_query = context_prefix + user_query
+        else:
+            llm_query = user_query
+        
+        # Get AI-generated rectification (use llm_query with context)
+        response = chain.invoke({"question": llm_query})
         
         # Extract result and source documents
         if isinstance(response, dict):
@@ -125,8 +175,8 @@ def process_file_query_json(chain, db, query: str) -> Dict[str, Any]:
             rectification = str(response)
             source_documents = []
         
-        # Get similar snags with metadata
-        similar_snags = get_similar_records_with_metadata(db, query, k=5)
+        # Get similar snags with metadata (use search_query for retrieval)
+        similar_snags = get_similar_records_with_metadata(db, search_query, k=5)
         
         # Extract PDF citations with bbox coordinates
         # Use source_documents if available, otherwise extract from similar_snags
@@ -141,15 +191,27 @@ def process_file_query_json(chain, db, query: str) -> Dict[str, Any]:
             ]
         
         logger.info(f"Extracting PDF citations from {len(docs_for_citation)} documents")
-        pdf_citations = extract_citations_from_retrieved_docs(docs_for_citation, query)
+        pdf_citations = extract_citations_from_retrieved_docs(docs_for_citation, user_query)
         logger.info(f"Extracted {len(pdf_citations)} PDF citations")
         
         # Generate session ID for citation storage
         session_id = str(uuid.uuid4())
         store_citations(session_id, pdf_citations)
 
-        # Format as JSON
-        json_results = display_results_as_json(rectification, similar_snags, query, pdf_citations, session_id)
+        # Format as JSON (use user_query for display)
+        json_results = display_results_as_json(rectification, similar_snags, user_query, pdf_citations, session_id)
+        
+        # Add conversation context to response if available
+        if conversation_context and conversation_context.get('has_context'):
+            json_results["conversation_context"] = {
+                "has_history": True,
+                "history_length": conversation_context.get('history_length', 0),
+                "context_used": conversation_context.get('context_summary')
+            }
+        else:
+            json_results["conversation_context"] = {
+                "has_history": False
+            }
         
         return json_results
         
@@ -158,7 +220,7 @@ def process_file_query_json(chain, db, query: str) -> Dict[str, Any]:
         from datetime import datetime
         return {
             "timestamp": datetime.now().isoformat(),
-            "query": query,
+            "query": user_query if user_query else search_query,
             "status": "error",
             "error_message": str(e),
             "session_id": None,

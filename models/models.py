@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List, Dict
 from pydantic import BaseModel
 from fastapi import UploadFile, File, Form
 
@@ -17,10 +17,15 @@ class ShapeDetectionResponse(BaseModel):
     csv_data: Optional[list] = None
     shapes_detected: Optional[int] = None
 
+class ConversationMessage(BaseModel):
+    role: str  # "user" or "assistant"
+    content: str
+
 class QueryRequestFile(BaseModel):
     query: str
     file_name: str
     pb_number: str
+    conversation_history: Optional[List[ConversationMessage]] = None
     
 class NamesReq(BaseModel):
     pb_number: str

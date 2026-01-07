@@ -177,6 +177,23 @@ async def rectification(request: QueryRequestFile) -> Dict[Any, Any]:
         file_name = request.file_name
         pb_number = request.pb_number
         final_query = request.query
+        conversation_history = request.conversation_history
+        
+        # Process conversation context
+        from services.conversation_service import process_conversational_query
+        
+        conversation_context = process_conversational_query(
+            final_query,
+            [{"role": msg.role, "content": msg.content} for msg in conversation_history] if conversation_history else None
+        )
+        
+        # Use contextualized query for RAG retrieval
+        if conversation_context["has_context"]:
+            logger.info(f"Using conversational context: {conversation_context['context_summary']}")
+            # Use standalone query for better retrieval
+            search_query = conversation_context["standalone_query"]
+        else:
+            search_query = final_query
         
         # Enhanced prompt verification
         is_valid, error_msg, verification_details = verify_prompt(final_query, context="aircraft")
@@ -205,9 +222,10 @@ async def rectification(request: QueryRequestFile) -> Dict[Any, Any]:
             if os.getenv("DEBUG_MODE") == "1":
                 test_retriever(db, "hydraulic system pressure low")
 
-            print("🔍 Final LLM Query:\n", final_query)
+            print("🔍 Search Query:\n", search_query)
+            print("🔍 User Query:\n", final_query)
 
-            json_results = process_snag_query_json(chain, db, final_query)
+            json_results = process_snag_query_json(chain, db, search_query, final_query, conversation_context)
 
             return jsonable_encoder(convert_numpy(json_results))
 
@@ -216,9 +234,10 @@ async def rectification(request: QueryRequestFile) -> Dict[Any, Any]:
             print(f"📄 Processing file-specific query for: {file_name}")
             chain, db = get_chain_file_chached(file_name, pb_number)
             
-            print("🔍 Final LLM Query:\n", final_query)
+            print("🔍 Search Query:\n", search_query)
+            print("🔍 User Query:\n", final_query)
             
-            json_results = process_file_query_json(chain, db, final_query)
+            json_results = process_file_query_json(chain, db, search_query, final_query, conversation_context)
             
             return jsonable_encoder(convert_numpy(json_results))
 
