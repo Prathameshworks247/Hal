@@ -28,14 +28,17 @@ except ImportError:
     PYMUPDF_AVAILABLE = False
     logger.warning("PyMuPDF not available for OCR processing")
 
-# Image preprocessing
-try:
-    import cv2
-    import numpy as np
-    CV2_AVAILABLE = True
-except ImportError:
-    CV2_AVAILABLE = False
-    logger.warning("OpenCV not available. OCR preprocessing will be limited.")
+# Image preprocessing - DISABLED due to numpy/cv2 segfault on macOS
+# To enable, fix numpy/OpenCV compatibility: pip install --upgrade numpy opencv-python-headless
+CV2_AVAILABLE = False
+logger.warning("OpenCV disabled due to compatibility issues. OCR preprocessing will be limited.")
+# try:
+#     import cv2
+#     import numpy as np
+#     CV2_AVAILABLE = True
+# except ImportError:
+#     CV2_AVAILABLE = False
+#     logger.warning("OpenCV not available. OCR preprocessing will be limited.")
 
 
 def is_tesseract_installed() -> bool:

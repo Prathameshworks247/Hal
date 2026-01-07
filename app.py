@@ -2,10 +2,19 @@
 from datetime import datetime
 import os
 import logging
-import cv2
-import numpy as np
-import os
 import io
+
+# NOTE: CV2 import disabled due to numpy/OpenCV compatibility issues on macOS
+# If you need OCR preprocessing, ensure compatible versions are installed:
+# pip install --upgrade numpy opencv-python-headless
+CV2_AVAILABLE = False
+# try:
+#     import cv2
+#     import numpy as np
+#     CV2_AVAILABLE = True
+# except ImportError:
+#     CV2_AVAILABLE = False
+#     logging.warning("OpenCV (cv2) not available. Some features may be limited.")
 import uuid
 import shutil
 from collections import defaultdict
@@ -27,17 +36,20 @@ from services.chain_service import get_chain, get_chain_file, verify
 from services.prompt_verifier import verify_prompt
 from services.citation_service import create_traceable_response, extract_citations_from_sources
 from services.document_parser import parse_document, get_supported_formats, check_format_support
+from services.pdf_citation_service import get_citations_for_session, get_citation_by_id
+from fastapi.responses import FileResponse
 from services.incremental_learning import IncrementalLearningManager, create_or_update_index
 from services.rbac_service import get_rbac_manager, Role, Permission
 from services.ingest import ingest_single_file, ingest_directory, rebuild_index_from_scratch, get_index_info
 from services.similarity_service import  get_similar_records_with_metadata
-from services.parsers import process_snag_query_json, display_results_as_json
+from services.parsers import process_snag_query_json, process_file_query_json, display_results_as_json
 from utils.utils import test_retriever, convert_numpy
 from services.chain_service import get_analytics_chain
 from services.parsers import process_snag_query_json_analysis
 from services.chain_service import get_analytics_chain_from_xls
 from services.similarity_service import has_semantic_meaning
-from vision.funcs import detect_shapes,get_pixels_per_mm,save_to_csv
+# DISABLED: vision.funcs uses cv2 which causes segfault on macOS
+# from vision.funcs import detect_shapes,get_pixels_per_mm,save_to_csv
 
 app = FastAPI(title="Aircraft AI API", description="")
 app.add_middleware(
@@ -200,17 +212,13 @@ async def rectification(request: QueryRequestFile) -> Dict[Any, Any]:
             return jsonable_encoder(convert_numpy(json_results))
 
         else:
+            # File-specific query with citation extraction
+            print(f"📄 Processing file-specific query for: {file_name}")
             chain, db = get_chain_file_chached(file_name, pb_number)
-            response = chain.invoke({"question": final_query})
-
-        # Extract result
-            if isinstance(response, dict):
-                rectification = response.get('result', response.get('answer', str(response)))
-            else:
-                rectification = str(response)
             
-            similar_snags = get_similar_records_with_metadata(db, final_query, k=5)
-            json_results = display_results_as_json(rectification, similar_snags, final_query)
+            print("🔍 Final LLM Query:\n", final_query)
+            
+            json_results = process_file_query_json(chain, db, final_query)
             
             return jsonable_encoder(convert_numpy(json_results))
 
@@ -751,6 +759,123 @@ async def admin_rebuild_index(
                 "success": False,
                 "error": str(e)
             }
+        )
+
+
+@app.get("/pdfs/{filename}")
+async def serve_pdf(filename: str):
+    """
+    Serve PDF files for citation viewing.
+    Searches in uploaded_excels directories and data directory.
+    """
+    # Search in common locations
+    search_paths = [
+        f"data/pdfs/{filename}",
+        f"uploaded_excels/**/{filename}",
+    ]
+    
+    # Also search in all pb_number directories
+    for pb_dir in os.listdir("uploaded_excels"):
+        pdf_path = f"uploaded_excels/{pb_dir}/{filename}"
+        if os.path.exists(pdf_path):
+            return FileResponse(
+                pdf_path,
+                media_type="application/pdf",
+                filename=filename
+            )
+    
+    # Check data/pdfs
+    pdf_path = f"data/pdfs/{filename}"
+    if os.path.exists(pdf_path):
+        return FileResponse(
+            pdf_path,
+            media_type="application/pdf",
+            filename=filename
+        )
+    
+    raise HTTPException(status_code=404, detail=f"PDF file not found: {filename}")
+
+
+@app.get("/api/citation/{citation_id}")
+async def get_citation_details(citation_id: str, session_id: str = None):
+    """
+    Get detailed citation information by citation ID.
+    Used when user clicks a citation in the UI.
+    
+    Args:
+        citation_id: Citation ID (e.g., "cite_1")
+        session_id: Optional session ID to filter citations
+    
+    Returns:
+        Citation details with PDF coordinates
+    """
+    try:
+        # If session_id provided, get citations from that session
+        if session_id:
+            citations = get_citations_for_session(session_id)
+            citation = get_citation_by_id(citation_id, citations)
+            
+            if citation:
+                # Add file_url for serving
+                filename = citation["source"]["file"]
+                citation["source"]["file_url"] = f"/pdfs/{filename}"
+                return citation
+        
+        # Fallback: return error
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": f"Citation {citation_id} not found",
+                "session_id": session_id
+            }
+        )
+        
+    except Exception as e:
+        logger.exception("Error retrieving citation details")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
+
+
+@app.post("/api/test-pdf-bbox")
+async def test_pdf_bbox_extraction(
+    file: UploadFile = File(...),
+    page_num: int = Form(...),
+    search_text: str = Form(...)
+):
+    """
+    Test endpoint to verify PDF bbox extraction works.
+    Upload a PDF and test text location finding.
+    """
+    from services.pdf_citation_service import test_bbox_extraction
+    import tempfile
+    
+    try:
+        # Save uploaded file temporarily
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+            content = await file.read()
+            temp_file.write(content)
+            temp_path = temp_file.name
+        
+        # Test bbox extraction
+        results = test_bbox_extraction(temp_path, page_num, search_text)
+        
+        # Clean up
+        os.remove(temp_path)
+        
+        return {
+            "file_name": file.filename,
+            "page_number": page_num,
+            "search_text": search_text,
+            "results": results,
+            "bbox_found": results["bbox"] is not None
+        }
+        
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
         )
 
 
