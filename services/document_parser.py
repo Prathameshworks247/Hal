@@ -680,11 +680,145 @@ def _extract_images_from_docx(file_path: str) -> List[Tuple[bytes, Dict[str, Any
 def _chunk_text(text: str, chunk_size: int, chunk_overlap: int) -> List[str]:
     """
     Split text into chunks with overlap for context preservation.
-    Uses sentence boundaries when possible for better semantic coherence.
+    Uses advanced NLP for better sentence and paragraph boundary detection.
+    Falls back to simple heuristics if NLP libraries unavailable.
     """
     if len(text) <= chunk_size:
         return [text]
     
+    # Try to use spaCy or NLTK for better sentence segmentation
+    sentences = _split_into_sentences_advanced(text)
+    
+    if not sentences:
+        # Fallback to simple chunking
+        return _chunk_text_simple(text, chunk_size, chunk_overlap)
+    
+    chunks = []
+    current_chunk = []
+    current_length = 0
+    
+    i = 0
+    while i < len(sentences):
+        sentence = sentences[i]
+        sentence_len = len(sentence)
+        
+        # If adding this sentence would exceed chunk_size
+        if current_length + sentence_len > chunk_size and current_chunk:
+            # Save current chunk
+            chunk_text = ' '.join(current_chunk).strip()
+            if chunk_text:
+                chunks.append(chunk_text)
+            
+            # Start new chunk with overlap
+            if chunk_overlap > 0:
+                # Add sentences from end of previous chunk for overlap
+                overlap_sentences = []
+                overlap_length = 0
+                for sent in reversed(current_chunk):
+                    if overlap_length + len(sent) <= chunk_overlap:
+                        overlap_sentences.insert(0, sent)
+                        overlap_length += len(sent) + 1  # +1 for space
+                    else:
+                        break
+                current_chunk = overlap_sentences
+                current_length = overlap_length
+            else:
+                current_chunk = []
+                current_length = 0
+        else:
+            # Add sentence to current chunk
+            current_chunk.append(sentence)
+            current_length += sentence_len + 1  # +1 for space
+    
+    # Add final chunk
+    if current_chunk:
+        chunk_text = ' '.join(current_chunk).strip()
+        if chunk_text:
+            chunks.append(chunk_text)
+    
+    return chunks if chunks else [text]
+
+
+def _split_into_sentences_advanced(text: str) -> List[str]:
+    """
+    Split text into sentences using advanced NLP (spaCy or NLTK).
+    Falls back to simple regex if libraries unavailable.
+    """
+    # Try spaCy first (better accuracy)
+    try:
+        import spacy
+        try:
+            # Try to load model
+            nlp = spacy.load("en_core_web_sm")
+            doc = nlp(text)
+            sentences = [sent.text.strip() for sent in doc.sents if sent.text.strip()]
+            if sentences:
+                logger.debug(f"Used spaCy for sentence segmentation: {len(sentences)} sentences")
+                return sentences
+        except OSError:
+            # Model not installed, try downloading
+            try:
+                import subprocess
+                import sys
+                subprocess.check_call([sys.executable, "-m", "spacy", "download", "en_core_web_sm", "--quiet"])
+                nlp = spacy.load("en_core_web_sm")
+                doc = nlp(text)
+                sentences = [sent.text.strip() for sent in doc.sents if sent.text.strip()]
+                if sentences:
+                    logger.debug(f"Used spaCy for sentence segmentation: {len(sentences)} sentences")
+                    return sentences
+            except Exception as e:
+                logger.debug(f"spaCy model installation failed: {e}")
+        except Exception as e:
+            logger.debug(f"spaCy processing failed: {e}")
+    except ImportError:
+        logger.debug("spaCy not available for sentence segmentation")
+    
+    # Try NLTK as fallback
+    try:
+        import nltk
+        try:
+            nltk.data.find('tokenizers/punkt')
+        except LookupError:
+            nltk.download('punkt', quiet=True)
+        
+        from nltk.tokenize import sent_tokenize
+        sentences = [s.strip() for s in sent_tokenize(text) if s.strip()]
+        if sentences:
+            logger.debug(f"Used NLTK for sentence segmentation: {len(sentences)} sentences")
+            return sentences
+    except (ImportError, Exception) as e:
+        logger.debug(f"NLTK not available for sentence segmentation: {e}")
+    
+    # Fallback to simple regex-based splitting
+    return _split_into_sentences_simple(text)
+
+
+def _split_into_sentences_simple(text: str) -> List[str]:
+    """
+    Simple regex-based sentence splitting as fallback.
+    Handles common sentence endings and abbreviations.
+    """
+    # Pattern to match sentence endings, but not abbreviations
+    # Match: period/exclamation/question followed by space and capital or end of string
+    import re
+    
+    # Split on sentence boundaries
+    pattern = r'(?<=[.!?])\s+(?=[A-Z])|(?<=[.!?])\s*$'
+    sentences = re.split(pattern, text)
+    sentences = [s.strip() for s in sentences if s.strip()]
+    
+    # Filter out very short sentences that are likely not complete
+    sentences = [s for s in sentences if len(s) > 10 or s.endswith(('.', '!', '?'))]
+    
+    return sentences if sentences else [text]
+
+
+def _chunk_text_simple(text: str, chunk_size: int, chunk_overlap: int) -> List[str]:
+    """
+    Simple chunking fallback using basic heuristics.
+    Used when advanced NLP is unavailable.
+    """
     chunks = []
     start = 0
     

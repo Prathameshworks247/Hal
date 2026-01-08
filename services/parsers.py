@@ -77,8 +77,14 @@ def process_snag_query_json(
             # CASE 2: No uploaded file - retrieve from BOTH (global + session memory)
             logger.info("Retrieving from GLOBAL_FAISS + SESSION_FAISS (conversation memory)")
             
-            # Get from global FAISS using original query
-            global_results = db.similarity_search(retrieval_query, k=3)
+            # Get from global FAISS using hybrid search (semantic + keyword + reranking)
+            try:
+                from services.hybrid_retrieval import hybrid_search_with_faiss
+                global_results = hybrid_search_with_faiss(db, retrieval_query, k=3, rerank=True)
+                logger.debug("Used hybrid search for global FAISS")
+            except Exception as e:
+                logger.warning(f"Hybrid search failed, falling back to semantic search: {e}")
+                global_results = db.similarity_search(retrieval_query, k=3)
             
             # Get from session FAISS (conversation memory) using original query
             session_results = session_manager.retrieve_from_session(retrieval_query, k=2)
@@ -98,7 +104,14 @@ def process_snag_query_json(
         else:
             # CASE 3: No session - retrieve from GLOBAL_FAISS only (legacy behavior)
             logger.info("Retrieving from GLOBAL_FAISS only (no session)")
-            retrieved_docs = db.similarity_search(retrieval_query, k=5)
+            # Use hybrid search (semantic + keyword + reranking)
+            try:
+                from services.hybrid_retrieval import hybrid_search_with_faiss
+                retrieved_docs = hybrid_search_with_faiss(db, retrieval_query, k=5, rerank=True)
+                logger.debug("Used hybrid search for retrieval")
+            except Exception as e:
+                logger.warning(f"Hybrid search failed, falling back to semantic search: {e}")
+                retrieved_docs = db.similarity_search(retrieval_query, k=5)
         
         # Create chain with appropriate retriever (SESSION or GLOBAL)
         if db_to_use_for_chain != db:
@@ -296,7 +309,18 @@ def process_file_query_json(
             
             # Retrieve from session using ORIGINAL query to avoid matching old conversation
             # The contextualized query is only for LLM understanding, not retrieval
-            all_retrieved = session_manager.retrieve_from_session(retrieval_query, k=10)
+            # Use hybrid search if available for session FAISS
+            try:
+                session_faiss = session_manager.load_session_faiss()
+                if session_faiss:
+                    from services.hybrid_retrieval import hybrid_search_with_faiss
+                    all_retrieved = hybrid_search_with_faiss(session_faiss, retrieval_query, k=10, rerank=True)
+                    logger.debug("Used hybrid search for session FAISS")
+                else:
+                    all_retrieved = session_manager.retrieve_from_session(retrieval_query, k=10)
+            except Exception as e:
+                logger.warning(f"Hybrid search for session failed, using standard retrieval: {e}")
+                all_retrieved = session_manager.retrieve_from_session(retrieval_query, k=10)
             
             # Filter: Prioritize document chunks (authoritative) over conversation memory
             doc_chunks = [doc for doc in all_retrieved if doc.metadata.get("type") != "conversation_memory"]
@@ -312,11 +336,17 @@ def process_file_query_json(
             # CASE 2: No uploaded file - retrieve from BOTH (global + session memory)
             logger.info("Retrieving from GLOBAL_FAISS + SESSION_FAISS (conversation memory)")
             
-            # Get from file-specific FAISS
-            file_results = db.similarity_search(search_query, k=3)
+            # Get from file-specific FAISS using hybrid search
+            try:
+                from services.hybrid_retrieval import hybrid_search_with_faiss
+                file_results = hybrid_search_with_faiss(db, retrieval_query, k=3, rerank=True)
+                logger.debug("Used hybrid search for file FAISS")
+            except Exception as e:
+                logger.warning(f"Hybrid search failed, falling back to semantic search: {e}")
+                file_results = db.similarity_search(retrieval_query, k=3)
             
             # Get from session FAISS (conversation memory)
-            session_results = session_manager.retrieve_from_session(search_query, k=2)
+            session_results = session_manager.retrieve_from_session(retrieval_query, k=2)
             
             # Merge with authority rules
             retrieved_docs = SessionFAISSManager.merge_retrieval_results(
@@ -329,7 +359,14 @@ def process_file_query_json(
         else:
             # CASE 3: No session - retrieve from file FAISS only (legacy behavior)
             logger.info("Retrieving from file FAISS only (no session)")
-            retrieved_docs = db.similarity_search(search_query, k=5)
+            # Use hybrid search (semantic + keyword + reranking)
+            try:
+                from services.hybrid_retrieval import hybrid_search_with_faiss
+                retrieved_docs = hybrid_search_with_faiss(db, retrieval_query, k=5, rerank=True)
+                logger.debug("Used hybrid search for file FAISS retrieval")
+            except Exception as e:
+                logger.warning(f"Hybrid search failed, falling back to semantic search: {e}")
+                retrieved_docs = db.similarity_search(retrieval_query, k=5)
         
         # Create chain with appropriate retriever (SESSION or GLOBAL)
         if db_to_use_for_chain != db:
