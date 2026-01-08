@@ -329,10 +329,16 @@ def get_chain_file_chached(file_name, pb_number):
 async def rectification(request: QueryRequestFile, background_tasks: BackgroundTasks) -> Dict[Any, Any]:
     try:
         file_name = request.file_name
-        pb_number = request.pb_number
+        pb_number = request.pb_number or "default"  # Use default if not provided
         final_query = request.query
-        conversation_history = request.conversation_history
+        conversation_history = request.conversation_history or []
         session_id = request.session_id
+        
+        logger.info(f"📥 Received query request:")
+        logger.info(f"   Query: {final_query[:50]}...")
+        logger.info(f"   File: {file_name}")
+        logger.info(f"   Session: {session_id or 'NEW'}")
+        logger.info(f"   History: {len(conversation_history)} messages")
         
         # Get or create session_id
         if not session_id:
@@ -414,12 +420,23 @@ async def rectification(request: QueryRequestFile, background_tasks: BackgroundT
             return jsonable_encoder(convert_numpy(json_results))
 
         else:
-            # File-specific query with citation extraction
+            # File-specific query - USE SESSION FAISS
             print(f"📄 Processing file-specific query for: {file_name}")
-            chain, db = get_chain_file_chached(file_name, pb_number)
+            
+            # Check if session has uploaded file
+            if not session_manager.has_uploaded_file():
+                return {
+                    "error": f"File '{file_name}' not found in session. Please upload the file first.",
+                    "session_id": session_id,
+                    "suggestion": "Use file_name='default' to search global knowledge base, or upload a file with this session_id first."
+                }
             
             print("🔍 Search Query:\n", search_query)
             print("🔍 User Query:\n", final_query)
+            print(f"📂 Querying from SESSION_FAISS (session: {session_id})")
+            
+            # Get chain for session FAISS (reuse global chain since we're passing session_manager)
+            chain, db = get_chain_cached()
             
             json_results, rectification_text = process_file_query_json(
                 chain, db, search_query, final_query, conversation_context,

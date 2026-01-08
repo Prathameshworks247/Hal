@@ -24,9 +24,9 @@ class ConversationMessage(BaseModel):
 class QueryRequestFile(BaseModel):
     query: str
     file_name: str
-    pb_number: str
-    conversation_history: Optional[List[ConversationMessage]] = None
     session_id: Optional[str] = None  # Session ID for ephemeral FAISS memory
+    conversation_history: List[ConversationMessage] = []  # Default to empty list
+    pb_number: Optional[str] = None  # Optional - extracted from auth context
     
 class NamesReq(BaseModel):
     pb_number: str

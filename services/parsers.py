@@ -226,10 +226,20 @@ def process_file_query_json(
         
         # Determine retrieval strategy based on session
         retrieved_docs: List[Document] = []
+        db_to_use_for_chain = db  # Default to global
         
         if session_manager and session_manager.has_uploaded_file():
             # CASE 1: User uploaded file - retrieve ONLY from SESSION_FAISS
             logger.info("Retrieving from SESSION_FAISS only (user uploaded file)")
+            
+            # Load session FAISS and use it for the chain
+            session_faiss = session_manager.load_session_faiss()
+            if session_faiss:
+                db_to_use_for_chain = session_faiss
+                logger.info("✅ Using SESSION_FAISS for chain retriever")
+            else:
+                logger.warning("⚠️  Session FAISS not found, falling back to GLOBAL_FAISS")
+            
             retrieved_docs = session_manager.retrieve_from_session(search_query, k=5)
             
         elif session_manager:
@@ -255,8 +265,18 @@ def process_file_query_json(
             logger.info("Retrieving from file FAISS only (no session)")
             retrieved_docs = db.similarity_search(search_query, k=5)
         
+        # Create chain with appropriate retriever (SESSION or GLOBAL)
+        if db_to_use_for_chain != db:
+            # Need to create a new chain with SESSION_FAISS retriever
+            logger.info("Creating chain with SESSION_FAISS retriever")
+            from services.chain_service import _create_qa_chain_from_db
+            session_chain = _create_qa_chain_from_db(db_to_use_for_chain)
+            chain_to_use = session_chain
+        else:
+            chain_to_use = chain
+        
         # Get AI-generated rectification (use llm_query with context)
-        response = chain.invoke({"question": llm_query})
+        response = chain_to_use.invoke({"question": llm_query})
         
         # Extract result and source documents
         if isinstance(response, dict):
@@ -270,8 +290,18 @@ def process_file_query_json(
         if not source_documents:
             source_documents = retrieved_docs
         
-        # Get similar snags with metadata (use search_query for retrieval)
-        similar_snags = get_similar_records_with_metadata(db, search_query, k=5)
+        # Get similar snags with metadata - use SESSION_FAISS if available
+        if session_manager and session_manager.has_uploaded_file():
+            # Use SESSION_FAISS for similar_snags
+            session_faiss = session_manager.load_session_faiss()
+            if session_faiss:
+                logger.info("Using SESSION_FAISS for similar_snags")
+                similar_snags = get_similar_records_with_metadata(session_faiss, search_query, k=5)
+            else:
+                similar_snags = get_similar_records_with_metadata(db, search_query, k=5)
+        else:
+            # Use GLOBAL_FAISS (or merged results)
+            similar_snags = get_similar_records_with_metadata(db_to_use_for_chain, search_query, k=5)
         
         # Extract PDF citations with bbox coordinates
         docs_for_citation = source_documents if source_documents else []
