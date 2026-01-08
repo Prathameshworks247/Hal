@@ -101,13 +101,3 @@ pytesseract>=0.3.10  # Python wrapper for Tesseract OCR
 
 # Additional image utilities
 scikit-image>=0.21.0  # For advanced image preprocessing (optional)
-
-# ============================================
-# ENHANCED RETRIEVAL - Hybrid Search & Reranking
-# ============================================
-
-# BM25 for keyword-based search (hybrid retrieval)
-rank-bm25>=0.2.2
-
-# NLTK for better text tokenization and sentence splitting
-nltk>=3.8.1
