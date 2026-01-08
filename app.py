@@ -21,7 +21,7 @@ from collections import defaultdict
 import pandas as pd
 import re
 from fastapi.responses import StreamingResponse,JSONResponse
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form,Depends
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict, List, Any
 from fastapi.staticfiles import StaticFiles
@@ -151,15 +151,169 @@ async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "service": "Shape Detection API"}
 
+
+@app.delete("/user/end-session/{session_id}")
+async def end_session(session_id: str):
+    """
+    End a session and delete all associated data (FAISS index, files, metadata).
+    
+    Args:
+        session_id: Session identifier to delete
+        
+    Returns:
+        Status of deletion operation
+    """
+    try:
+        from services.session_faiss_manager import SessionFAISSManager
+        from services.multimodal_embeddings import get_multimodal_embeddings
+        from services.session_storage import session_exists, get_session_size_mb
+        
+        if not session_exists(session_id):
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "status": "not_found",
+                    "session_id": session_id,
+                    "message": "Session does not exist"
+                }
+            )
+        
+        # Get session size before deletion
+        size_mb = get_session_size_mb(session_id) or 0
+        
+        # Initialize manager and destroy session
+        embeddings = get_multimodal_embeddings(model_path="./all-MiniLM-L6-v2", device='cpu')
+        session_manager = SessionFAISSManager(session_id, embeddings)
+        
+        # Get metadata before deletion
+        metadata = session_manager.get_session_metadata()
+        
+        success = session_manager.destroy_session()
+        
+        if success:
+            return {
+                "status": "deleted",
+                "session_id": session_id,
+                "deleted_files": 1 if metadata.has_uploaded_file else 0,
+                "deleted_embeddings": metadata.total_embeddings,
+                "conversation_turns": metadata.conversation_turns,
+                "size_mb": size_mb,
+                "message": "Session and all associated data deleted successfully"
+            }
+        else:
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "status": "error",
+                    "session_id": session_id,
+                    "message": "Failed to delete session"
+                }
+            )
+            
+    except Exception as e:
+        logger.exception(f"Error deleting session {session_id}")
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "error": str(e)}
+        )
+
+
+@app.get("/admin/sessions")
+async def list_sessions():
+    """
+    List all active sessions with metadata.
+    Admin endpoint for monitoring session storage.
+    
+    Returns:
+        List of active sessions with details
+    """
+    try:
+        from services.session_storage import get_all_session_info, list_active_sessions
+        
+        sessions_info = get_all_session_info()
+        active_session_ids = list_active_sessions()
+        
+        # Calculate total storage used
+        from services.session_storage import get_session_size_mb
+        total_size_mb = sum(get_session_size_mb(sid) or 0 for sid in active_session_ids)
+        
+        return {
+            "status": "success",
+            "active_sessions": len(active_session_ids),
+            "sessions": [
+                {
+                    "session_id": info.session_id,
+                    "created_at": info.created_at.isoformat(),
+                    "last_accessed": info.last_accessed.isoformat(),
+                    "age_hours": info.age_hours,
+                    "has_uploaded_file": info.has_uploaded_file,
+                    "uploaded_file_name": info.uploaded_file_name,
+                    "conversation_turns": info.conversation_turns,
+                    "total_embeddings": info.total_embeddings
+                }
+                for info in sessions_info
+            ],
+            "total_storage_mb": round(total_size_mb, 2)
+        }
+        
+    except Exception as e:
+        logger.exception("Error listing sessions")
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "error": str(e)}
+        )
+
+
+@app.post("/admin/cleanup-sessions")
+async def cleanup_sessions(max_age_hours: int = 24):
+    """
+    Manually trigger cleanup of expired sessions.
+    
+    Args:
+        max_age_hours: Maximum age in hours before deletion (default: 24)
+        
+    Returns:
+        Number of sessions cleaned up
+    """
+    try:
+        from services.session_storage import cleanup_expired_sessions
+        
+        deleted_count = cleanup_expired_sessions(max_age_hours)
+        
+        return {
+            "status": "success",
+            "deleted_sessions": deleted_count,
+            "max_age_hours": max_age_hours,
+            "message": f"Cleaned up {deleted_count} expired sessions"
+        }
+        
+    except Exception as e:
+        logger.exception("Error during session cleanup")
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "error": str(e)}
+        )
+
+
 @app.on_event("startup")
 async def cleanup_old_files():
-    """Clean up old files on server startup"""
+    """Clean up old files and expired sessions on server startup"""
     try:
+        # Cleanup old static files
         for file in os.listdir("static"):
             if file.startswith(("processed_", "shapes_")):
                 os.remove(f"static/{file}")
     except:
         pass
+    
+    # Cleanup expired sessions (older than 24 hours)
+    try:
+        from services.session_storage import cleanup_expired_sessions
+        deleted = cleanup_expired_sessions(max_age_hours=24)
+        if deleted > 0:
+            logger.info(f"Startup cleanup: Deleted {deleted} expired sessions")
+    except Exception as e:
+        logger.error(f"Error during startup session cleanup: {str(e)}")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -172,11 +326,49 @@ def get_chain_file_chached(file_name, pb_number):
 
 
 @app.post("/user/rectify")
-async def rectification(request: QueryRequestFile) -> Dict[Any, Any]:
+async def rectification(request: QueryRequestFile, background_tasks: BackgroundTasks) -> Dict[Any, Any]:
     try:
         file_name = request.file_name
-        pb_number = request.pb_number
+        pb_number = request.pb_number or "default"  # Use default if not provided
         final_query = request.query
+        conversation_history = request.conversation_history or []
+        session_id = request.session_id
+        
+        logger.info(f"📥 Received query request:")
+        logger.info(f"   Query: {final_query[:50]}...")
+        logger.info(f"   File: {file_name}")
+        logger.info(f"   Session: {session_id or 'NEW'}")
+        logger.info(f"   History: {len(conversation_history)} messages")
+        
+        # Get or create session_id
+        if not session_id:
+            session_id = str(uuid.uuid4())
+            logger.info(f"Created new session: {session_id}")
+        else:
+            logger.info(f"Using existing session: {session_id}")
+        
+        # Initialize SessionFAISSManager
+        from services.session_faiss_manager import SessionFAISSManager
+        from services.multimodal_embeddings import get_multimodal_embeddings
+        
+        embeddings = get_multimodal_embeddings(model_path="./all-MiniLM-L6-v2", device='cpu')
+        session_manager = SessionFAISSManager(session_id, embeddings)
+        
+        # Process conversation context
+        from services.conversation_service import process_conversational_query
+        
+        conversation_context = process_conversational_query(
+            final_query,
+            [{"role": msg.role, "content": msg.content} for msg in conversation_history] if conversation_history else None
+        )
+        
+        # Use contextualized query for RAG retrieval
+        if conversation_context["has_context"]:
+            logger.info(f"Using conversational context: {conversation_context['context_summary']}")
+            # Use standalone query for better retrieval
+            search_query = conversation_context["standalone_query"]
+        else:
+            search_query = final_query
         
         # Enhanced prompt verification
         is_valid, error_msg, verification_details = verify_prompt(final_query, context="aircraft")
@@ -205,24 +397,68 @@ async def rectification(request: QueryRequestFile) -> Dict[Any, Any]:
             if os.getenv("DEBUG_MODE") == "1":
                 test_retriever(db, "hydraulic system pressure low")
 
-            print("🔍 Final LLM Query:\n", final_query)
+            print("🔍 Search Query:\n", search_query)
+            print("🔍 User Query:\n", final_query)
 
-            json_results = process_snag_query_json(chain, db, final_query)
+            json_results, rectification_text = process_snag_query_json(
+                chain, db, search_query, final_query, conversation_context,
+                session_manager=session_manager,
+                citation_session_id=session_id
+            )
+            
+            # Add conversation memory to SESSION_FAISS (in background)
+            if rectification_text:
+                background_tasks.add_task(
+                    session_manager.add_conversation_memory,
+                    final_query,
+                    rectification_text
+                )
+            
+            # Add session_id to response
+            json_results["session_id"] = session_id
 
             return jsonable_encoder(convert_numpy(json_results))
 
         else:
-            # File-specific query with citation extraction
+            # File-specific query - USE SESSION FAISS
             print(f"📄 Processing file-specific query for: {file_name}")
-            chain, db = get_chain_file_chached(file_name, pb_number)
             
-            print("🔍 Final LLM Query:\n", final_query)
+            # Check if session has uploaded file
+            if not session_manager.has_uploaded_file():
+                return {
+                    "error": f"File '{file_name}' not found in session. Please upload the file first.",
+                    "session_id": session_id,
+                    "suggestion": "Use file_name='default' to search global knowledge base, or upload a file with this session_id first."
+                }
             
-            json_results = process_file_query_json(chain, db, final_query)
+            print("🔍 Search Query:\n", search_query)
+            print("🔍 User Query:\n", final_query)
+            print(f"📂 Querying from SESSION_FAISS (session: {session_id})")
+            
+            # Get chain for session FAISS (reuse global chain since we're passing session_manager)
+            chain, db = get_chain_cached()
+            
+            json_results, rectification_text = process_file_query_json(
+                chain, db, search_query, final_query, conversation_context,
+                session_manager=session_manager,
+                citation_session_id=session_id
+            )
+            
+            # Add conversation memory to SESSION_FAISS (in background)
+            if rectification_text:
+                background_tasks.add_task(
+                    session_manager.add_conversation_memory,
+                    final_query,
+                    rectification_text
+                )
+            
+            # Add session_id to response
+            json_results["session_id"] = session_id
             
             return jsonable_encoder(convert_numpy(json_results))
 
     except Exception as e:
+        logger.exception("Error in rectification endpoint")
         return {"error": str(e)}
 
 # @app.post("/rectify-file")
@@ -466,6 +702,14 @@ def get_unique_row(request: GetRows):
 @app.post("/user/store-file")
 async def store_file(request: ExcelFileInput = Depends()):
     try:
+        # Get or create session_id
+        session_id = request.session_id
+        if not session_id:
+            session_id = str(uuid.uuid4())
+            logger.info(f"Created new session for file upload: {session_id}")
+        else:
+            logger.info(f"Using existing session for file upload: {session_id}")
+        
         UPLOAD_DIR = f"uploaded_excels/{request.pb_number}"
         os.makedirs(UPLOAD_DIR, exist_ok=True)
 
@@ -490,33 +734,82 @@ async def store_file(request: ExcelFileInput = Depends()):
 
         # Handle OCR if PDF and is_scanned flag is set
         ocr_status = None
+        use_ocr = False
         if file_ext == '.pdf' and request.is_scanned:
             from services.ocr_service import get_ocr_status
             ocr_check = get_ocr_status()
             if ocr_check["tesseract_installed"]:
                 logger.info(f"📄 Scanned PDF detected: {file_name} - OCR will be applied during parsing")
                 ocr_status = "OCR will be applied during indexing"
+                use_ocr = True
             else:
                 logger.warning("Tesseract OCR not installed. Cannot process scanned PDF.")
                 ocr_status = "WARNING: Tesseract not installed - file saved but OCR unavailable"
 
+        # Parse document and create embeddings for SESSION_FAISS
+        from services.document_parser import parse_document
+        from services.session_faiss_manager import SessionFAISSManager
+        from services.multimodal_embeddings import get_multimodal_embeddings
+        
+        logger.info(f"Parsing document and creating embeddings for session: {session_id}")
+        documents = parse_document(file_location, use_ocr=use_ocr)
+        
+        if not documents:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "No content could be extracted from the file",
+                    "session_id": session_id
+                }
+            )
+        
+        # Initialize SessionFAISSManager
+        embeddings = get_multimodal_embeddings(model_path="./all-MiniLM-L6-v2", device='cpu')
+        session_manager = SessionFAISSManager(session_id, embeddings)
+        
+        # Add uploaded file embeddings to SESSION_FAISS
+        success = session_manager.add_uploaded_file_embeddings(documents)
+        
+        if not success:
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "error": "Failed to create embeddings for the uploaded file",
+                    "session_id": session_id
+                }
+            )
+        
+        # Update session metadata
+        session_manager.metadata.uploaded_file_name = request.file.filename
+        session_manager.metadata.uploaded_file_type = file_ext
+        from services.session_storage import save_session_metadata
+        save_session_metadata(session_id, session_manager.metadata)
+
         response_data = {
-            "message": "File Uploaded Successfully",
+            "status": "success",
+            "message": "File uploaded and embedded in session FAISS",
+            "session_id": session_id,
             "file_name": file_name,
             "file_location": file_location,
+            "file_type": file_ext,
+            "chunks_stored": len(documents),
+            "storage_location": "session",
             "is_scanned": request.is_scanned,
             "ocr_status": ocr_status
         }
         
-        print("File Uploaded:", file_location)
+        logger.info(f"✓ File uploaded and embedded: {file_name} ({len(documents)} chunks) in session {session_id}")
         if ocr_status:
-            print(f"OCR Status: {ocr_status}")
+            logger.info(f"OCR Status: {ocr_status}")
             
         return JSONResponse(content=response_data)
+        
     except Exception as e:
-        logger.exception("Error during sending file")
-        print("Error during sending file:", e)
-        return {"error": str(e)}
+        logger.exception("Error during file upload and embedding")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
     
 @app.post("/user/files")
 async def send_file_names(request: NamesReq):

@@ -1,156 +1,167 @@
-# Quick Start Guide - Sky-Sentinel
+# 🚀 Quick Start Guide - Session FAISS System
 
-## 🚀 Get Running in 10 Minutes
+## ✅ What Was Fixed
 
-### Prerequisites
-- Python 3.10+
-- 8GB RAM
-- 10GB free space
+Your FastAPI backend now accepts requests from the Node.js app without requiring `pb_number` in the request body.
 
-### Installation (5 minutes)
+---
 
+## 🎯 Changes Summary
+
+### Changed Files:
+1. **`models/models.py`** - Made `pb_number` optional
+2. **`app.py`** - Added default value handling
+
+### What Node.js Sends:
+```json
+{
+  "query": "Your question here",
+  "file_name": "default",
+  "session_id": "abc-123",
+  "conversation_history": [...]
+}
+```
+✅ No `pb_number` required!
+
+---
+
+## 🧪 Test It Now
+
+### Step 1: Start Server
 ```bash
-# 1. Clone and setup
-git clone <repo-url>
-cd Sky-Sentinal
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
-# 2. Install dependencies
-pip install -r requirements.txt
-python -m spacy download en_core_web_md
-
-# 3. Install Ollama
-# Download from: https://ollama.ai
-# Then pull model:
-ollama pull llama3.2:8b-instruct-q4_K_M
-
-# 4. Start server
-uvicorn app:app --reload --host 0.0.0.0 --port 8000
+cd /Users/prathameshpatil/Sky-Sentinal
+source hall/bin/activate
+python app.py
 ```
 
-### First Query (2 minutes)
-
+### Step 2: Run Tests (New Terminal)
 ```bash
-# 1. Upload a document
-curl -X POST "http://localhost:8000/store_file" \
-  -F "file=@your_document.pdf" \
-  -F "pb_number=TEST001"
+cd /Users/prathameshpatil/Sky-Sentinal
+source hall/bin/activate
+python test_session_api.py
+```
 
-# 2. Query the system
-curl -X POST "http://localhost:8000/rectify" \
+### Step 3: Test with cURL
+```bash
+# Test 1: New session
+curl -X POST http://localhost:8000/user/rectify \
   -H "Content-Type: application/json" \
   -d '{
-    "query": "Snag: Your query here",
+    "query": "What is aircraft corrosion?",
     "file_name": "default",
-    "pb_number": "TEST001"
+    "conversation_history": []
+  }'
+
+# Save the session_id from response, then:
+
+# Test 2: Follow-up with session
+curl -X POST http://localhost:8000/user/rectify \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "How to prevent it?",
+    "file_name": "default",
+    "session_id": "YOUR_SESSION_ID_HERE",
+    "conversation_history": [
+      {"role": "user", "content": "What is aircraft corrosion?"},
+      {"role": "assistant", "content": "Corrosion is..."}
+    ]
   }'
 ```
 
-### Access API Documentation
+---
 
-Open browser: http://localhost:8000/docs
+## 📊 Expected Behavior
+
+### ✅ What Works Now:
+
+1. **New Query (No session_id)**
+   - Backend creates new session automatically
+   - Returns session_id in response
+   - Retrieves from GLOBAL_FAISS
+
+2. **Follow-up Query (With session_id)**
+   - Uses conversation history
+   - Retrieves from GLOBAL_FAISS + SESSION_FAISS (conversation memory)
+   - Maintains context
+
+3. **File Upload**
+   - Creates/reuses session
+   - Embeds file in SESSION_FAISS
+   - Returns session_id
+
+4. **Query After Upload**
+   - Retrieves ONLY from SESSION_FAISS (user's file)
+   - Conversation memory included
 
 ---
 
-## 📋 Key Features
+## 🎯 Integration with Node.js
 
-✅ **Multi-Format Support:** PDF, DOCX, TXT, Excel
-✅ **Offline Operation:** No internet required
-✅ **Citations:** Precise source attribution
-✅ **Anti-Hallucination:** Verified, grounded responses
-✅ **Incremental Learning:** Add documents without rebuild
-✅ **RBAC:** Role-based access control
+Your Node.js app should:
 
----
+1. **Send initial query:**
+   ```javascript
+   const response = await axios.post('/user/rectify', {
+     query: userInput,
+     file_name: 'default',
+     conversation_history: []
+   });
+   
+   // Save session_id
+   const sessionId = response.data.session_id;
+   ```
 
-## 🎯 Common Use Cases
+2. **Send follow-up queries:**
+   ```javascript
+   const response = await axios.post('/user/rectify', {
+     query: userInput,
+     file_name: 'default',
+     session_id: sessionId,  // Use saved session_id
+     conversation_history: [...history]
+   });
+   ```
 
-### 1. Technical Manual Search
-```bash
-POST /rectify
-{
-  "query": "Snag: Hydraulic pressure low",
-  "file_name": "default",
-  "pb_number": "PROJ001"
-}
-```
-
-### 2. Analytics
-```bash
-POST /analytics
-{
-  "query": "Analyze engine failures",
-  "file_name": "default",
-  "pb_number": "PROJ001"
-}
-```
-
-### 3. Verify Query Quality
-```bash
-POST /verify_query
-{
-  "query": "Your query here"
-}
-```
+3. **Clean up when done:**
+   ```javascript
+   await axios.delete(`/user/end-session/${sessionId}`);
+   ```
 
 ---
 
-## 🔧 Configuration
+## 🔍 Troubleshooting
 
-### Change LLM Model
+### Server won't start?
+- Check if port 8000 is already in use
+- Look for segmentation fault errors (known macOS issue with numpy)
 
-Edit `services/llm.py`:
-```python
-model = "llama3.2:8b-instruct-q4_K_M"  # Default
-# Or use: qwen2.5:7b-instruct-q4_K_M
-```
+### Validation errors?
+- Check that request has `query` and `file_name` (required)
+- `session_id` and `conversation_history` are optional
 
-### Adjust Chunk Size
-
-Edit `services/document_parser.py`:
-```python
-chunk_size = 1000  # Default
-chunk_overlap = 200  # Default
-```
+### Sessions not persisting?
+- Check `sessions/` directory exists
+- Verify session_id is being sent in follow-up requests
 
 ---
 
-## 📚 Documentation
+## 📁 Important Files
 
-- **Full README:** [README.md](README.md)
-- **Installation Guide:** [INSTALLATION.md](INSTALLATION.md)
-- **Hackathon Guide:** [HACKATHON_GUIDE.md](HACKATHON_GUIDE.md)
-- **API Docs:** http://localhost:8000/docs
-
----
-
-## 🆘 Troubleshooting
-
-**Issue:** Ollama connection error
-```bash
-# Solution: Start Ollama
-ollama serve &
-ollama list
-```
-
-**Issue:** Module not found
-```bash
-# Solution: Reinstall dependencies
-pip install -r requirements.txt
-```
-
-**Issue:** Spacy model error
-```bash
-# Solution: Download model
-python -m spacy download en_core_web_md
-```
+| File | Purpose |
+|------|---------|
+| `models/models.py` | Request/response models |
+| `services/session_faiss_manager.py` | Session FAISS logic |
+| `services/session_storage.py` | File system operations |
+| `test_session_api.py` | Test script |
+| `SESSION_FAISS_IMPLEMENTATION.md` | Full documentation |
+| `BACKEND_INTEGRATION_FIX.md` | This fix details |
 
 ---
 
-## 🎉 You're Ready!
+## ✅ You're Ready!
 
-Visit http://localhost:8000/docs to explore all API endpoints.
+Everything is set up. Just:
+1. Start the server
+2. Run tests to verify
+3. Connect your Node.js app
 
-For detailed documentation, see [README.md](README.md).
-
+🎉 **The session-based conversational RAG is ready to use!**

@@ -11,3 +11,8 @@ confidential_snag.xlsx
 data
 myenv
 uploaded_excels
+<<<<<<< HEAD
+env
+=======
+sessions/
+>>>>>>> 4c56db99220e49ddafd2410a5483048b87e7839e

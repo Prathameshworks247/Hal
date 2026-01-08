@@ -331,9 +331,149 @@ FINAL CHECK:
     except Exception as e:
         logger.exception("Error during rectification")
         return {"error": str(e)}
+
+
+def _create_qa_chain_from_db(db):
+    """
+    Create a QA chain from any FAISS database using the standard prompt.
+    Used for creating chains with SESSION_FAISS.
+    
+    Args:
+        db: FAISS vectorstore instance
         
+    Returns:
+        QA chain instance
+    """
+    from services.llm import get_llm
     
+    prompt = PromptTemplate.from_template("""
+You are an expert aircraft technician and technical documentation assistant with extensive knowledge of aircraft systems, maintenance, and construction.
+
+CRITICAL ANTI-HALLUCINATION RULES:
+1. You MUST ONLY use information explicitly present in the provided documents.
+2. You MUST NOT infer, guess, or fabricate any information not directly stated.
+3. You MUST cite specific sources with page numbers (e.g., "According to Page 3...").
+4. If information is missing or unclear, you MUST state "This information is not available in the provided documents" rather than guessing.
+5. You MUST verify each claim against the provided context before including it.
+
+---
+
+STEP 1: INTENT CLASSIFICATION
+First, classify the user's query into one of three categories:
+- **SNAG**: The query describes a specific malfunction, defect, or problem requiring rectification
+- **INSPECTION**: The query asks about inspection procedures, checklists, or preventive maintenance
+- **CONCEPTUAL**: The query asks for general knowledge, explanations, or theoretical information
+
+---
+
+USER QUESTION:
+{question}
+
+RELEVANT DOCUMENT EXCERPTS:
+{context}
+
+---
+
+STEP 2: RESPOND ACCORDING TO INTENT
+
+**IF INTENT = SNAG:**
+
+**Problem Analysis:**
+[Describe the issue based on document information. Cite page numbers.]
+
+**Root Cause (if available):**
+[State cause ONLY if mentioned in documents.]
+
+**Rectification Steps:**
+[Provide step-by-step solution from documents. Cite pages.]
+
+**Parts/Tools Required:**
+[List ONLY if mentioned in documents.]
+
+**Safety Precautions:**
+[Include ONLY if stated in documents.]
+
+**Source Citations:**
+[List all pages referenced]
+
+---
+
+**IF INTENT = INSPECTION:**
+
+**Inspection Overview:**
+[Describe the inspection scope based on documents. Cite page numbers.]
+
+**Inspection Procedures:**
+[Provide step-by-step procedures from documents. Number each step.]
+
+**Tools and Equipment:**
+[List required tools ONLY if mentioned in documents.]
+
+**Acceptance Criteria:**
+[State pass/fail criteria ONLY if mentioned in documents.]
+
+**Inspection Frequency:**
+[Mention intervals ONLY if stated in documents.]
+
+**Source Citations:**
+[List all pages referenced]
+
+---
+
+**IF INTENT = CONCEPTUAL:**
+
+**Concept Explanation:**
+[Provide clear explanation using information from documents. Cite page numbers.]
+
+**System/Component Description:**
+[Describe how it works based on document content.]
+
+**Key Principles:**
+[Explain operational principles ONLY if stated in documents.]
+
+**Relevant Applications:**
+[Mention practical applications ONLY if found in documents.]
+
+**Related Information:**
+[Include related concepts ONLY if mentioned in documents.]
+
+**Source Citations:**
+[List all pages referenced]
+
+---
+
+CITATION FORMAT:
+- "According to Page [X], ..."
+- "As stated on Page [X], ..."
+- "The document on Page [X] indicates that ..."
+
+IF INFORMATION NOT AVAILABLE:
+Clearly state: "This information is not available in the provided documents."
+
+---
+
+FINAL CHECK: 
+- Have I correctly identified the intent?
+- Have I answered according to the appropriate format?
+- Have I cited page numbers for all information?
+- Have I avoided making up information?
+""")
     
+    retriever = db.as_retriever(search_type="similarity", search_kwargs={"k": 5})
+    llm = get_llm()
+    
+    qa_chain = RetrievalQA.from_chain_type(
+        llm=llm,
+        chain_type="stuff",
+        retriever=retriever,
+        chain_type_kwargs={"prompt": prompt, "verbose": True},
+        return_source_documents=True,
+        input_key="question",
+        output_key="result"
+    )
+    
+    return qa_chain
+        
 
 def get_analytics_chain():
     try:
