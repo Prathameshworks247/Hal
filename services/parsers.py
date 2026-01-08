@@ -43,36 +43,54 @@ def process_snag_query_json(
         if conversation_context and conversation_context.get('has_context'):
             logger.info(f"  With conversation context: {conversation_context.get('context_summary')}")
         
-        # Build enhanced query with conversation context
-        if conversation_context and conversation_context.get('has_context'):
-            # Prepend conversation context to help LLM understand references
-            context_prefix = f"[Conversation Context: {conversation_context['full_context']}]\n\nCurrent Question: "
-            llm_query = context_prefix + user_query
-        else:
-            llm_query = user_query
+        # IMPORTANT: Use original query for retrieval to avoid matching old conversation memory
+        # Use original query, not contextualized, to find relevant documents
+        retrieval_query = user_query
         
         # Determine retrieval strategy based on session
         retrieved_docs: List[Document] = []
+        db_to_use_for_chain = db  # Default to global
         
         if session_manager and session_manager.has_uploaded_file():
             # CASE 1: User uploaded file - retrieve ONLY from SESSION_FAISS
             logger.info("Retrieving from SESSION_FAISS only (user uploaded file)")
-            retrieved_docs = session_manager.retrieve_from_session(search_query, k=5)
+            
+            # Load session FAISS and use it for the chain
+            session_faiss = session_manager.load_session_faiss()
+            if session_faiss:
+                db_to_use_for_chain = session_faiss
+                logger.info("✅ Using SESSION_FAISS for chain retriever")
+            else:
+                logger.warning("⚠️  Session FAISS not found, falling back to GLOBAL_FAISS")
+            
+            # Retrieve using original query and filter conversation memory
+            all_retrieved = session_manager.retrieve_from_session(retrieval_query, k=10)
+            
+            # Filter: Prioritize document chunks over conversation memory
+            doc_chunks = [doc for doc in all_retrieved if doc.metadata.get("type") != "conversation_memory"]
+            conversation_memory = [doc for doc in all_retrieved if doc.metadata.get("type") == "conversation_memory"]
+            
+            retrieved_docs = doc_chunks[:5] if len(doc_chunks) >= 5 else doc_chunks + conversation_memory[:1]
+            logger.info(f"Retrieved: {len(doc_chunks)} doc chunks, {len(conversation_memory)} memories, using {len(retrieved_docs)}")
             
         elif session_manager:
             # CASE 2: No uploaded file - retrieve from BOTH (global + session memory)
             logger.info("Retrieving from GLOBAL_FAISS + SESSION_FAISS (conversation memory)")
             
-            # Get from global FAISS
-            global_results = db.similarity_search(search_query, k=3)
+            # Get from global FAISS using original query
+            global_results = db.similarity_search(retrieval_query, k=3)
             
-            # Get from session FAISS (conversation memory)
-            session_results = session_manager.retrieve_from_session(search_query, k=2)
+            # Get from session FAISS (conversation memory) using original query
+            session_results = session_manager.retrieve_from_session(retrieval_query, k=2)
             
-            # Merge with authority rules
+            # Filter conversation memory to prioritize documents
+            session_docs = [doc for doc in session_results if doc.metadata.get("type") != "conversation_memory"]
+            session_memory = [doc for doc in session_results if doc.metadata.get("type") == "conversation_memory"]
+            
+            # Merge with authority rules (prioritize documents)
             retrieved_docs = SessionFAISSManager.merge_retrieval_results(
                 global_results=global_results,
-                session_results=session_results,
+                session_results=session_docs + session_memory[:1],  # Include max 1 memory
                 k=5,
                 prioritize="documents"
             )
@@ -80,10 +98,19 @@ def process_snag_query_json(
         else:
             # CASE 3: No session - retrieve from GLOBAL_FAISS only (legacy behavior)
             logger.info("Retrieving from GLOBAL_FAISS only (no session)")
-            retrieved_docs = db.similarity_search(search_query, k=5)
+            retrieved_docs = db.similarity_search(retrieval_query, k=5)
+        
+        # Create chain with appropriate retriever (SESSION or GLOBAL)
+        if db_to_use_for_chain != db:
+            logger.info("Creating chain with SESSION_FAISS retriever")
+            from services.chain_service import _create_qa_chain_from_db
+            chain_to_use = _create_qa_chain_from_db(db_to_use_for_chain)
+        else:
+            chain_to_use = chain
         
         # Get AI-generated rectification
-        response = chain.invoke({"question": llm_query})
+        # Use original query for retrieval to avoid matching old conversation
+        response = chain_to_use.invoke({"question": retrieval_query})
         
         # Extract result and source documents
         if isinstance(response, dict):
@@ -93,12 +120,32 @@ def process_snag_query_json(
             rectification = str(response)
             source_documents = []
         
+        # Filter out conversation memory from source_documents
+        if source_documents:
+            source_documents = [
+                doc for doc in source_documents 
+                if doc.metadata.get("type") != "conversation_memory"
+            ]
+            logger.info(f"Filtered source_documents to {len(source_documents)} document chunks")
+        
         # Use retrieved_docs if no source_documents from chain
         if not source_documents:
             source_documents = retrieved_docs
         
-        # Get similar snags with metadata (use search_query for better retrieval)
-        similar_snags = get_similar_snags_with_metadata(db, search_query, k=5)
+        # Get similar snags with metadata - use original query
+        if session_manager and session_manager.has_uploaded_file():
+            session_faiss = session_manager.load_session_faiss()
+            if session_faiss:
+                similar_snags = get_similar_snags_with_metadata(session_faiss, retrieval_query, k=5)
+                # Filter conversation memory
+                similar_snags = [
+                    snag for snag in similar_snags 
+                    if snag.get('metadata', {}).get('type') != 'conversation_memory'
+                ]
+            else:
+                similar_snags = get_similar_snags_with_metadata(db, retrieval_query, k=5)
+        else:
+            similar_snags = get_similar_snags_with_metadata(db_to_use_for_chain, retrieval_query, k=5)
         
         # Extract PDF citations with bbox coordinates
         docs_for_citation = source_documents if source_documents else []
@@ -217,16 +264,23 @@ def process_file_query_json(
         if conversation_context and conversation_context.get('has_context'):
             logger.info(f"  With conversation context: {conversation_context.get('context_summary')}")
         
-        # Build enhanced query with conversation context
-        if conversation_context and conversation_context.get('has_context'):
-            context_prefix = f"[Conversation Context: {conversation_context['full_context']}]\n\nCurrent Question: "
-            llm_query = context_prefix + user_query
-        else:
-            llm_query = user_query
-        
         # Determine retrieval strategy based on session
+        # IMPORTANT: Use original query for retrieval to avoid matching old conversation memory
+        # The LLM will get context from retrieved documents, not from query string
         retrieved_docs: List[Document] = []
         db_to_use_for_chain = db  # Default to global
+        
+        # Use original query for retrieval (not contextualized) to find relevant documents
+        retrieval_query = user_query
+        
+        # Build LLM query - use original query but with clear instruction to focus on current question
+        # The context will come from retrieved documents, not from query string
+        if conversation_context and conversation_context.get('has_context'):
+            # Add brief context summary, but keep CURRENT QUESTION prominent
+            context_summary = conversation_context.get('context_summary', '')
+            llm_query = f"{user_query}\n\nNote: This is a follow-up question. Previous conversation was about: {context_summary}. Please answer this current question based on the retrieved documents."
+        else:
+            llm_query = user_query
         
         if session_manager and session_manager.has_uploaded_file():
             # CASE 1: User uploaded file - retrieve ONLY from SESSION_FAISS
@@ -240,7 +294,19 @@ def process_file_query_json(
             else:
                 logger.warning("⚠️  Session FAISS not found, falling back to GLOBAL_FAISS")
             
-            retrieved_docs = session_manager.retrieve_from_session(search_query, k=5)
+            # Retrieve from session using ORIGINAL query to avoid matching old conversation
+            # The contextualized query is only for LLM understanding, not retrieval
+            all_retrieved = session_manager.retrieve_from_session(retrieval_query, k=10)
+            
+            # Filter: Prioritize document chunks (authoritative) over conversation memory
+            doc_chunks = [doc for doc in all_retrieved if doc.metadata.get("type") != "conversation_memory"]
+            conversation_memory = [doc for doc in all_retrieved if doc.metadata.get("type") == "conversation_memory"]
+            
+            # Use mostly document chunks, maybe 1 conversation memory if helpful
+            retrieved_docs = doc_chunks[:5] if len(doc_chunks) >= 5 else doc_chunks + conversation_memory[:1]
+            
+            logger.info(f"Retrieved: {len(doc_chunks)} document chunks, {len(conversation_memory)} conversation memories")
+            logger.info(f"Using: {len(retrieved_docs)} documents (filtered to prioritize document chunks)")
             
         elif session_manager:
             # CASE 2: No uploaded file - retrieve from BOTH (global + session memory)
@@ -275,8 +341,11 @@ def process_file_query_json(
         else:
             chain_to_use = chain
         
-        # Get AI-generated rectification (use llm_query with context)
-        response = chain_to_use.invoke({"question": llm_query})
+        # Get AI-generated rectification
+        # IMPORTANT: Use original query for retrieval to avoid matching old conversation
+        # The chain's retriever will search with this query, finding relevant documents
+        # The LLM will then answer based on those documents
+        response = chain_to_use.invoke({"question": retrieval_query})
         
         # Extract result and source documents
         if isinstance(response, dict):
@@ -286,22 +355,39 @@ def process_file_query_json(
             rectification = str(response)
             source_documents = []
         
+        # Filter out conversation memory from source_documents to avoid repetition
+        if source_documents:
+            source_documents = [
+                doc for doc in source_documents 
+                if doc.metadata.get("type") != "conversation_memory"
+            ]
+            logger.info(f"Filtered source_documents to {len(source_documents)} document chunks (excluded conversation memory)")
+        
         # Use retrieved_docs if no source_documents from chain
         if not source_documents:
             source_documents = retrieved_docs
         
         # Get similar snags with metadata - use SESSION_FAISS if available
+        # Use original query (not contextualized) to avoid matching old conversations
         if session_manager and session_manager.has_uploaded_file():
             # Use SESSION_FAISS for similar_snags
             session_faiss = session_manager.load_session_faiss()
             if session_faiss:
                 logger.info("Using SESSION_FAISS for similar_snags")
-                similar_snags = get_similar_records_with_metadata(session_faiss, search_query, k=5)
+                # Use original query to find relevant document chunks, not conversation memory
+                similar_snags = get_similar_records_with_metadata(session_faiss, user_query, k=5)
+                
+                # Filter out conversation memory from similar_snags
+                similar_snags = [
+                    snag for snag in similar_snags 
+                    if snag.get('metadata', {}).get('type') != 'conversation_memory'
+                ]
+                logger.info(f"Filtered similar_snags to {len(similar_snags)} document chunks (excluded conversation memory)")
             else:
-                similar_snags = get_similar_records_with_metadata(db, search_query, k=5)
+                similar_snags = get_similar_records_with_metadata(db, user_query, k=5)
         else:
             # Use GLOBAL_FAISS (or merged results)
-            similar_snags = get_similar_records_with_metadata(db_to_use_for_chain, search_query, k=5)
+            similar_snags = get_similar_records_with_metadata(db_to_use_for_chain, user_query, k=5)
         
         # Extract PDF citations with bbox coordinates
         docs_for_citation = source_documents if source_documents else []
