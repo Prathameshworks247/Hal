@@ -26,6 +26,7 @@ class QueryRequestFile(BaseModel):
     file_name: str
     pb_number: str
     conversation_history: Optional[List[ConversationMessage]] = None
+    session_id: Optional[str] = None  # Session ID for ephemeral FAISS memory
     
 class NamesReq(BaseModel):
     pb_number: str
@@ -39,8 +40,10 @@ class ExcelFileInput:
         self,
         file: UploadFile = File(...),
         pb_number: str = Form(...),
-        is_scanned: bool = Form(False)
+        is_scanned: bool = Form(False),
+        session_id: Optional[str] = Form(None)
     ):
         self.file = file
         self.pb_number = pb_number
         self.is_scanned = is_scanned
+        self.session_id = session_id
