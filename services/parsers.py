@@ -8,6 +8,8 @@ from services.pdf_citation_service import extract_citations_from_retrieved_docs,
 from services.session_faiss_manager import SessionFAISSManager
 from langchain.schema import Document
 import uuid
+import json
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +102,21 @@ def process_snag_query_json(
             logger.info("Retrieving from GLOBAL_FAISS only (no session)")
             retrieved_docs = db.similarity_search(retrieval_query, k=5)
         
+        # Extract PDF citations BEFORE LLM call so we can reference them
+        docs_for_citation = retrieved_docs if retrieved_docs else []
+        
+        logger.info(f"Extracting PDF citations from {len(docs_for_citation)} documents (before LLM call)")
+        pdf_citations = extract_citations_from_retrieved_docs(docs_for_citation, user_query)
+        logger.info(f"Extracted {len(pdf_citations)} PDF citations")
+        
+        # Format citations as text for LLM context
+        citation_text = ""
+        if pdf_citations:
+            citation_lines = []
+            for cit in pdf_citations:
+                citation_lines.append(f"{cit.get('id', 'unknown')}: {cit.get('text', '')[:100]}...")
+            citation_text = "\n".join(citation_lines)
+        
         # Create chain with appropriate retriever (SESSION or GLOBAL)
         if db_to_use_for_chain != db:
             logger.info("Creating chain with SESSION_FAISS retriever")
@@ -108,16 +125,21 @@ def process_snag_query_json(
         else:
             chain_to_use = chain
         
+        # Format question with citation context if available
+        llm_question = retrieval_query
+        if citation_text:
+            llm_question = f"{retrieval_query}\n\nAvailable citation IDs (reference these in your response):\n{citation_text}"
+        
         # Get AI-generated rectification
         # Use original query for retrieval to avoid matching old conversation
-        response = chain_to_use.invoke({"question": retrieval_query})
+        response = chain_to_use.invoke({"question": llm_question})
         
         # Extract result and source documents
         if isinstance(response, dict):
-            rectification = response.get('result', response.get('answer', str(response)))
+            rectification_raw = response.get('result', response.get('answer', str(response)))
             source_documents = response.get('source_documents', [])
         else:
-            rectification = str(response)
+            rectification_raw = str(response)
             source_documents = []
         
         # Filter out conversation memory from source_documents
@@ -131,6 +153,39 @@ def process_snag_query_json(
         # Use retrieved_docs if no source_documents from chain
         if not source_documents:
             source_documents = retrieved_docs
+        
+        # Parse JSON from LLM response
+        structured_response = None
+        try:
+            # Clean and parse JSON from response
+            cleaned_response = clean_json_block(rectification_raw)
+            if cleaned_response and isinstance(cleaned_response, dict):
+                structured_response = cleaned_response
+                logger.info("Successfully parsed structured JSON from LLM response")
+            else:
+                logger.warning("Failed to parse JSON from LLM response, using fallback")
+                # Fallback: create basic structure from raw text
+                structured_response = {
+                    "intent": "CONCEPTUAL",
+                    "sections": [{
+                        "type": "concept_explanation",
+                        "title": "Response",
+                        "content": rectification_raw,
+                        "citations": []
+                    }]
+                }
+        except Exception as e:
+            logger.error(f"Error parsing JSON response: {str(e)}")
+            # Fallback structure
+            structured_response = {
+                "intent": "CONCEPTUAL",
+                "sections": [{
+                    "type": "concept_explanation",
+                    "title": "Response",
+                    "content": rectification_raw,
+                    "citations": []
+                }]
+            }
         
         # Get similar snags with metadata - use original query
         if session_manager and session_manager.has_uploaded_file():
@@ -147,27 +202,15 @@ def process_snag_query_json(
         else:
             similar_snags = get_similar_snags_with_metadata(db_to_use_for_chain, retrieval_query, k=5)
         
-        # Extract PDF citations with bbox coordinates
-        docs_for_citation = source_documents if source_documents else []
-        
-        # If no source_documents, extract document objects from similar_snags
-        if not docs_for_citation and similar_snags:
-            docs_for_citation = [
-                snag['document'] 
-                for snag in similar_snags 
-                if 'document' in snag and snag.get('metadata', {}).get('file_type') == 'pdf'
-            ]
-        
-        logger.info(f"Extracting PDF citations from {len(docs_for_citation)} documents")
-        pdf_citations = extract_citations_from_retrieved_docs(docs_for_citation, user_query)
-        logger.info(f"Extracted {len(pdf_citations)} PDF citations")
-        
         # Use provided citation_session_id or generate new
         citation_sid = citation_session_id or str(uuid.uuid4())
         store_citations(citation_sid, pdf_citations)
 
-        # Format as JSON (use user_query for display)
-        json_results = display_results_as_json(rectification, similar_snags, user_query, pdf_citations, citation_sid)
+        # Format as JSON using structured response (use user_query for display)
+        json_results = display_results_as_json(structured_response, similar_snags, user_query, pdf_citations, citation_sid)
+        
+        # Keep raw rectification for conversation memory (use first section content as fallback)
+        rectification = structured_response.get('sections', [{}])[0].get('content', '') if structured_response.get('sections') else rectification_raw
         
         # Add conversation context to response if available
         if conversation_context and conversation_context.get('has_context'):
@@ -191,19 +234,14 @@ def process_snag_query_json(
             "query": user_query if user_query else search_query,
             "status": "error",
             "error_message": str(e),
-            "rectification": None,
+            "intent": "CONCEPTUAL",
+            "sections": [],
             "similar_historical_snags": [],
-            "summary": {
-                "total_similar_cases_found": 0,
-                "average_similarity_percentage": 0,
-                "highest_similarity_percentage": 0,
-                "lowest_similarity_percentage": 0,
-                "recommendation_reliability": "none"
-            }
+            "citations": []
         }, None
 
 
-def display_results_as_json(response_text: str, similar_snags: List[Dict[str, Any]], query: str, 
+def display_results_as_json(structured_response: Dict[str, Any], similar_snags: List[Dict[str, Any]], query: str, 
                            citations: List[Dict[str, Any]] = None, session_id: str = None) -> Dict[str, Any]:
     """Format and display results as structured JSON with PDF citations"""
     num_snags = len(similar_snags)
@@ -214,16 +252,27 @@ def display_results_as_json(response_text: str, similar_snags: List[Dict[str, An
         clean_snag = {k: v for k, v in snag.items() if k != 'document'}
         clean_snags.append(clean_snag)
     
+    # Extract intent and sections from structured response
+    intent = structured_response.get("intent", "CONCEPTUAL") if isinstance(structured_response, dict) else "CONCEPTUAL"
+    sections = structured_response.get("sections", []) if isinstance(structured_response, dict) else []
+    
+    # If structured_response is not a dict (legacy format), create fallback
+    if not isinstance(structured_response, dict):
+        intent = "CONCEPTUAL"
+        sections = [{
+            "type": "concept_explanation",
+            "title": "Response",
+            "content": str(structured_response),
+            "citations": []
+        }]
+    
     results = {
         "timestamp": datetime.now().isoformat(),
         "query": query,
         "status": "success",
         "session_id": session_id,
-        "rectification": {
-            "ai_recommendation": response_text,
-            "based_on_historical_cases": num_snags,
-            "confidence": "high" if num_snags >= 3 else "medium" if num_snags >= 2 else "low"
-        },
+        "intent": intent,
+        "sections": sections,
         "similar_historical_snags": clean_snags,
         "citations": citations if citations else []
     }
@@ -341,18 +390,38 @@ def process_file_query_json(
         else:
             chain_to_use = chain
         
+        # Extract PDF citations BEFORE LLM call so we can reference them
+        docs_for_citation = retrieved_docs if retrieved_docs else []
+        
+        logger.info(f"Extracting PDF citations from {len(docs_for_citation)} documents (before LLM call)")
+        pdf_citations = extract_citations_from_retrieved_docs(docs_for_citation, user_query)
+        logger.info(f"Extracted {len(pdf_citations)} PDF citations")
+        
+        # Format citations as text for LLM context
+        citation_text = ""
+        if pdf_citations:
+            citation_lines = []
+            for cit in pdf_citations:
+                citation_lines.append(f"{cit.get('id', 'unknown')}: {cit.get('text', '')[:100]}...")
+            citation_text = "\n".join(citation_lines)
+        
+        # Format question with citation context if available
+        llm_question = retrieval_query
+        if citation_text:
+            llm_question = f"{retrieval_query}\n\nAvailable citation IDs (reference these in your response):\n{citation_text}"
+        
         # Get AI-generated rectification
         # IMPORTANT: Use original query for retrieval to avoid matching old conversation
         # The chain's retriever will search with this query, finding relevant documents
         # The LLM will then answer based on those documents
-        response = chain_to_use.invoke({"question": retrieval_query})
+        response = chain_to_use.invoke({"question": llm_question})
         
         # Extract result and source documents
         if isinstance(response, dict):
-            rectification = response.get('result', response.get('answer', str(response)))
+            rectification_raw = response.get('result', response.get('answer', str(response)))
             source_documents = response.get('source_documents', [])
         else:
-            rectification = str(response)
+            rectification_raw = str(response)
             source_documents = []
         
         # Filter out conversation memory from source_documents to avoid repetition
@@ -366,6 +435,39 @@ def process_file_query_json(
         # Use retrieved_docs if no source_documents from chain
         if not source_documents:
             source_documents = retrieved_docs
+        
+        # Parse JSON from LLM response
+        structured_response = None
+        try:
+            # Clean and parse JSON from response
+            cleaned_response = clean_json_block(rectification_raw)
+            if cleaned_response and isinstance(cleaned_response, dict):
+                structured_response = cleaned_response
+                logger.info("Successfully parsed structured JSON from LLM response")
+            else:
+                logger.warning("Failed to parse JSON from LLM response, using fallback")
+                # Fallback: create basic structure from raw text
+                structured_response = {
+                    "intent": "CONCEPTUAL",
+                    "sections": [{
+                        "type": "concept_explanation",
+                        "title": "Response",
+                        "content": rectification_raw,
+                        "citations": []
+                    }]
+                }
+        except Exception as e:
+            logger.error(f"Error parsing JSON response: {str(e)}")
+            # Fallback structure
+            structured_response = {
+                "intent": "CONCEPTUAL",
+                "sections": [{
+                    "type": "concept_explanation",
+                    "title": "Response",
+                    "content": rectification_raw,
+                    "citations": []
+                }]
+            }
         
         # Get similar snags with metadata - use SESSION_FAISS if available
         # Use original query (not contextualized) to avoid matching old conversations
@@ -389,27 +491,15 @@ def process_file_query_json(
             # Use GLOBAL_FAISS (or merged results)
             similar_snags = get_similar_records_with_metadata(db_to_use_for_chain, user_query, k=5)
         
-        # Extract PDF citations with bbox coordinates
-        docs_for_citation = source_documents if source_documents else []
-        
-        # If no source_documents, extract document objects from similar_snags
-        if not docs_for_citation and similar_snags:
-            docs_for_citation = [
-                snag['document'] 
-                for snag in similar_snags 
-                if 'document' in snag and snag.get('metadata', {}).get('file_type') == 'pdf'
-            ]
-        
-        logger.info(f"Extracting PDF citations from {len(docs_for_citation)} documents")
-        pdf_citations = extract_citations_from_retrieved_docs(docs_for_citation, user_query)
-        logger.info(f"Extracted {len(pdf_citations)} PDF citations")
-        
         # Use provided citation_session_id or generate new
         citation_sid = citation_session_id or str(uuid.uuid4())
         store_citations(citation_sid, pdf_citations)
 
-        # Format as JSON (use user_query for display)
-        json_results = display_results_as_json(rectification, similar_snags, user_query, pdf_citations, citation_sid)
+        # Format as JSON using structured response (use user_query for display)
+        json_results = display_results_as_json(structured_response, similar_snags, user_query, pdf_citations, citation_sid)
+        
+        # Keep raw rectification for conversation memory (use first section content as fallback)
+        rectification = structured_response.get('sections', [{}])[0].get('content', '') if structured_response.get('sections') else rectification_raw
         
         # Add conversation context to response if available
         if conversation_context and conversation_context.get('has_context'):
@@ -434,11 +524,8 @@ def process_file_query_json(
             "status": "error",
             "error_message": str(e),
             "session_id": citation_session_id,
-            "rectification": {
-                "ai_recommendation": None,
-                "based_on_historical_cases": 0,
-                "confidence": "none"
-            },
+            "intent": "CONCEPTUAL",
+            "sections": [],
             "similar_historical_snags": [],
             "citations": []
         }, None
