@@ -319,8 +319,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 @lru_cache()
-def get_chain_cached():
-    return get_chain()
+def get_chain_cached(department: str = None, query: str = None):
+    # Normalize None to empty string for caching
+    dept_key = department if department is not None else ""
+    query_key = query if query is not None else ""
+    return get_chain(department=dept_key if dept_key else None, query=query_key if query_key else None)
 def get_chain_file_chached(file_name, pb_number):
     return get_chain_file(file_name, pb_number)
 
@@ -393,7 +396,18 @@ async def rectification(request: QueryRequestFile, background_tasks: BackgroundT
 
         print("🚁 Aircraft Snag Resolution System - JSON Output")
         if file_name == 'default':    
-            chain, db = get_chain_cached()
+            # Route to department-specific FAISS index
+            department = request.department if hasattr(request, 'department') and request.department else None
+            logger.info(f"📂 Department routing: {department if department else 'null (will infer)'}")
+            
+            chain, db = get_chain_cached(department=department or "", query=final_query or "")
+            
+            if db is None:
+                return {
+                    "error": "Failed to load FAISS index for department routing",
+                    "session_id": session_id
+                }
+            
             if os.getenv("DEBUG_MODE") == "1":
                 test_retriever(db, "hydraulic system pressure low")
 

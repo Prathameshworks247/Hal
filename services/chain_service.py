@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 import os
@@ -7,7 +8,6 @@ from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 import pandas as pd
 from langchain.schema import Document
-import logging
 from langchain.chains import LLMChain
 from services.excel_service import excel_to_documents
 from services.document_parser import parse_document
@@ -15,7 +15,7 @@ from services.multimodal_embeddings import get_multimodal_embeddings
 
 logger = logging.getLogger(__name__)
 
-def get_chain():
+def get_chain(department: Optional[str] = None, query: Optional[str] = None):
     try:
         logger.info("Initializing embeddings model...")
         model_path = "./all-MiniLM-L6-v2"
@@ -26,18 +26,18 @@ def get_chain():
         embeddings = get_multimodal_embeddings(model_path=model_path, device='cpu')
         logger.info("Multimodal embeddings model loaded successfully.")
 
-        logger.info("Loading FAISS index...")
-        # Check if FAISS index exists
-        faiss_index_path = "snag_faiss_index"
-        if not os.path.exists(faiss_index_path):
-            raise FileNotFoundError(f"FAISS index not found at {faiss_index_path}")
+        logger.info("Loading FAISS index with department routing...")
+        from services.department_routing import route_to_department_faiss
         
-        db = FAISS.load_local(
-            faiss_index_path, 
-            embeddings=embeddings, 
-            allow_dangerous_deserialization=True
-        )
-        logger.info("FAISS index loaded successfully.")
+        # Route to appropriate department index
+        if query is None:
+            query = ""
+        db, actual_department = route_to_department_faiss(department, query)
+        
+        if db is None:
+            raise FileNotFoundError(f"Failed to load FAISS index for department routing")
+        
+        logger.info(f"FAISS index loaded successfully. Department: {actual_department}")
 
         retriever = db.as_retriever(search_type="similarity", search_kwargs={"k": 5}) 
         logger.info("Retriever configured successfully.")

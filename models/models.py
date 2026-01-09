@@ -27,6 +27,7 @@ class QueryRequestFile(BaseModel):
     session_id: Optional[str] = None  # Session ID for ephemeral FAISS memory
     conversation_history: List[ConversationMessage] = []  # Default to empty list
     pb_number: Optional[str] = None  # Optional - extracted from auth context
+    department: Optional[str] = None  # Department for FAISS routing: structures, avionics, propulsion, maintenance, general, default
     
 class NamesReq(BaseModel):
     pb_number: str
