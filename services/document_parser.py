@@ -70,23 +70,29 @@ def parse_pdf(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200, 
     
     # If OCR mode is enabled, use TrOCR service
     if use_ocr:
-        from services.ocr_service import ocr_pdf_document, is_trocr_available
+        from services.ocr_service import ocr_pdf_document, is_trocr_available, extract_text_with_trocr
         
         if not is_trocr_available():
             raise ImportError("TrOCR not available. Install: pip install transformers torch pillow")
         
         logger.info(f"🔍 Using TrOCR mode for: {file_name}")
+        
+        # Open PDF to extract both page text (via OCR) and images
+        doc = fitz.open(file_path)
+        total_pages = len(doc)
+        
         # Use "auto" to automatically detect printed vs handwritten
         ocr_result = ocr_pdf_document(file_path, model_type="auto")
         
         if not ocr_result.get("success"):
             error_msg = ocr_result.get("error", "Unknown OCR error")
             logger.error(f"TrOCR failed: {error_msg}")
+            doc.close()
             raise RuntimeError(f"TrOCR processing failed: {error_msg}")
         
         logger.info(f"✓ TrOCR completed: {ocr_result['processed_pages']} pages, avg confidence: {ocr_result['avg_confidence']}%, engine: {ocr_result.get('ocr_engine', 'TrOCR')}")
         
-        # Process OCR results into documents
+        # Process OCR results into documents (text from pages)
         for page_result in ocr_result["pages"]:
             if page_result["success"] and page_result["text"]:
                 text = page_result["text"]
@@ -110,12 +116,122 @@ def parse_pdf(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200, 
                             "ocr_model_type": model_type,
                             "ocr_confidence": page_result["confidence"],
                             "ingestion_timestamp": datetime.now().isoformat(),
-                            "total_pages": ocr_result["total_pages"],
+                            "total_pages": total_pages,
                             "citation": f"{file_name}, Page {page_num} (TrOCR-{model_type})"
                         }
                     ))
         
-        logger.info(f"✓ Created {len(documents)} TrOCR document chunks from {file_name}")
+        # Extract and process images from each page with TrOCR
+        logger.info(f"Extracting images from {total_pages} pages and applying TrOCR...")
+        image_count = 0
+        
+        for page_num in range(total_pages):
+            page = doc[page_num]
+            
+            # Extract images from this page
+            page_images = _extract_images_from_pdf_page(page, page_num + 1, file_name)
+            
+            # Process each image with TrOCR
+            for image_bytes, image_meta in page_images:
+                try:
+                    image_count += 1
+                    logger.info(f"Processing image {image_count} from page {page_num + 1} with TrOCR...")
+                    
+                    # Apply TrOCR to the image
+                    # Use "printed" model by default (can be enhanced with auto-detection)
+                    ocr_image_result = extract_text_with_trocr(image_bytes, model_type="printed", preprocess=True)
+                    
+                    if ocr_image_result.get("success") and ocr_image_result.get("text"):
+                        image_text = ocr_image_result.get("text", "").strip()
+                        image_confidence = ocr_image_result.get("confidence", 0)
+                        image_model_type = ocr_image_result.get("model_type", "printed")
+                        
+                        if image_text:
+                            # Create document for OCR'd image text
+                            documents.append(Document(
+                                page_content=f"Image content (TrOCR): {image_text}",
+                                metadata={
+                                    "type": "image_ocr",
+                                    "source": file_name,
+                                    "file_path": file_path,
+                                    "page_number": page_num + 1,
+                                    "image_index": image_meta.get("image_index", 0),
+                                    "image_format": image_meta.get("format", "unknown"),
+                                    "file_type": "pdf",
+                                    "ocr_applied": True,
+                                    "ocr_engine": "TrOCR",
+                                    "ocr_model_type": image_model_type,
+                                    "ocr_confidence": image_confidence,
+                                    "authoritative": True,  # OCR text from images is authoritative
+                                    "ingestion_timestamp": datetime.now().isoformat(),
+                                    "total_pages": total_pages,
+                                    "citation": f"{file_name}, Page {page_num + 1}, Image {image_meta.get('image_index', 0) + 1} (TrOCR-{image_model_type})"
+                                }
+                            ))
+                            logger.info(f"✓ Extracted text from image {image_count}: {len(image_text)} chars")
+                        else:
+                            logger.warning(f"No text extracted from image {image_count} on page {page_num + 1}")
+                    else:
+                        # If OCR fails, still create a document noting the image exists
+                        error_msg = ocr_image_result.get("error", "Unknown error")
+                        logger.warning(f"TrOCR failed for image {image_count} on page {page_num + 1}: {error_msg}")
+                        documents.append(Document(
+                            page_content=f"Image detected on page {page_num + 1} but TrOCR extraction failed: {error_msg}",
+                            metadata={
+                                "type": "image_ocr_failed",
+                                "source": file_name,
+                                "file_path": file_path,
+                                "page_number": page_num + 1,
+                                "image_index": image_meta.get("image_index", 0),
+                                "file_type": "pdf",
+                                "ocr_applied": True,
+                                "ocr_engine": "TrOCR",
+                                "ocr_error": error_msg,
+                                "authoritative": False,
+                                "ingestion_timestamp": datetime.now().isoformat(),
+                                "total_pages": total_pages,
+                                "citation": f"{file_name}, Page {page_num + 1}, Image {image_meta.get('image_index', 0) + 1} (TrOCR-failed)"
+                            }
+                        ))
+                    
+                    # Also generate BLIP description for context (if available)
+                    try:
+                        image_description = _generate_image_description(image_bytes, image_meta.get("format", "PNG"))
+                        if image_description and "unavailable" not in image_description.lower():
+                            documents.append(Document(
+                                page_content=f"Image description: {image_description}",
+                                metadata={
+                                    "type": "image_description",
+                                    "source": file_name,
+                                    "file_path": file_path,
+                                    "page_number": page_num + 1,
+                                    "image_index": image_meta.get("image_index", 0),
+                                    "file_type": "pdf",
+                                    "authoritative": False,  # BLIP descriptions are supplementary
+                                    "ingestion_timestamp": datetime.now().isoformat(),
+                                    "total_pages": total_pages,
+                                    "citation": f"{file_name}, Page {page_num + 1}, Image {image_meta.get('image_index', 0) + 1} (BLIP-description)"
+                                }
+                            ))
+                    except Exception as e:
+                        logger.debug(f"BLIP description generation skipped for image {image_count}: {str(e)}")
+                        
+                except Exception as e:
+                    logger.warning(f"Failed to process image {image_count} from page {page_num + 1}: {str(e)}")
+                    continue
+        
+        doc.close()
+        
+        text_chunks = len([d for d in documents if d.metadata.get("type") not in ["image_ocr", "image_ocr_failed", "image_description"]])
+        image_ocr_chunks = len([d for d in documents if d.metadata.get("type") == "image_ocr"])
+        image_desc_chunks = len([d for d in documents if d.metadata.get("type") == "image_description"])
+        
+        logger.info(f"✓ Created {len(documents)} TrOCR document chunks from {file_name}:")
+        logger.info(f"  - {text_chunks} text chunks (page OCR)")
+        logger.info(f"  - {image_ocr_chunks} image OCR chunks")
+        logger.info(f"  - {image_desc_chunks} image description chunks")
+        logger.info(f"  - {image_count} total images processed")
+        
         return documents
     
     # Standard native PDF processing (non-OCR mode)
