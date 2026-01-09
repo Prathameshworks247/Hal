@@ -18,7 +18,9 @@ def process_snag_query_json(
     user_query: str = None, 
     conversation_context: dict = None,
     session_manager: Optional[SessionFAISSManager] = None,
-    citation_session_id: Optional[str] = None
+    citation_session_id: Optional[str] = None,
+    department: Optional[str] = None,
+    document_type: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Process snag query with optional conversation context and session awareness.
@@ -77,51 +79,64 @@ def process_snag_query_json(
             # CASE 2: No uploaded file - retrieve from BOTH (global + session memory)
             logger.info("Retrieving from GLOBAL_FAISS + SESSION_FAISS (conversation memory)")
             
-            # Infer metadata from query for Global FAISS filtering
-            from services.query_metadata_service import infer_query_metadata
-            inferred_metadata = infer_query_metadata(retrieval_query)
-            
-            # Apply metadata filtering if confident
-            if inferred_metadata.get("confidence") in ["high", "medium"]:
-                dept = inferred_metadata.get("department")
-                doc_type = inferred_metadata.get("document_type")
+            # Priority: Frontend metadata > LLM inference
+            if department or document_type:
+                # Frontend provided metadata - use it directly
+                logger.info(f"Using frontend-provided metadata - dept: {department}, type: {document_type}")
+                dept = department
+                doc_type = document_type
+                use_filtering = True
+            else:
+                # No frontend metadata - infer from query using LLM
+                from services.query_metadata_service import infer_query_metadata
+                inferred_metadata = infer_query_metadata(retrieval_query)
                 
-                if dept or doc_type:
-                    logger.info(f"Applying metadata filter - dept: {dept}, type: {doc_type}")
-                    
-                    # Build filter function for FAISS
-                    def metadata_filter(doc_metadata):
-                        match = True
-                        if dept and doc_metadata.get("department") != dept:
-                            match = False
-                        if doc_type and doc_metadata.get("document_type") != doc_type:
-                            match = False
-                        return match
-                    
-                    # Try filtered search first
-                    try:
-                        global_results = db.similarity_search(
-                            retrieval_query, 
-                            k=5,
-                            filter=metadata_filter
-                        )
-                        
-                        # Fallback to unfiltered if no results
-                        if not global_results:
-                            logger.warning("Metadata filter returned no results, falling back to unfiltered search")
-                            global_results = db.similarity_search(retrieval_query, k=3)
-                        else:
-                            logger.info(f"Metadata filter returned {len(global_results)} results")
-                            global_results = global_results[:3]  # Take top 3
-                    except Exception as e:
-                        logger.warning(f"Metadata filtering failed: {str(e)}, using unfiltered search")
-                        global_results = db.similarity_search(retrieval_query, k=3)
+                # Only use if confident
+                if inferred_metadata.get("confidence") in ["high", "medium"]:
+                    dept = inferred_metadata.get("department")
+                    doc_type = inferred_metadata.get("document_type")
+                    use_filtering = bool(dept or doc_type)
+                    if use_filtering:
+                        logger.info(f"Using LLM-inferred metadata - dept: {dept}, type: {doc_type}, confidence: {inferred_metadata.get('confidence')}")
                 else:
-                    # No metadata to filter on
+                    dept = None
+                    doc_type = None
+                    use_filtering = False
+                    logger.info("Low confidence in metadata inference, using unfiltered search")
+            
+            # Apply filtering if we have metadata (from frontend or LLM)
+            if use_filtering:
+                logger.info(f"Applying metadata filter - dept: {dept}, type: {doc_type}")
+                
+                # Build filter function for FAISS
+                def metadata_filter(doc_metadata):
+                    match = True
+                    if dept and doc_metadata.get("department") != dept:
+                        match = False
+                    if doc_type and doc_metadata.get("document_type") != doc_type:
+                        match = False
+                    return match
+                
+                # Try filtered search first
+                try:
+                    global_results = db.similarity_search(
+                        retrieval_query, 
+                        k=5,
+                        filter=metadata_filter
+                    )
+                    
+                    # Fallback to unfiltered if no results
+                    if not global_results:
+                        logger.warning("Metadata filter returned no results, falling back to unfiltered search")
+                        global_results = db.similarity_search(retrieval_query, k=3)
+                    else:
+                        logger.info(f"Metadata filter returned {len(global_results)} results")
+                        global_results = global_results[:3]  # Take top 3
+                except Exception as e:
+                    logger.warning(f"Metadata filtering failed: {str(e)}, using unfiltered search")
                     global_results = db.similarity_search(retrieval_query, k=3)
             else:
-                # Low confidence or no inference - use unfiltered search
-                logger.info("Low confidence in metadata inference, using unfiltered search")
+                # No metadata available - use unfiltered search
                 global_results = db.similarity_search(retrieval_query, k=3)
             
             # Get from session FAISS (conversation memory) using original query
@@ -143,51 +158,64 @@ def process_snag_query_json(
             # CASE 3: No session - retrieve from GLOBAL_FAISS only (legacy behavior)
             logger.info("Retrieving from GLOBAL_FAISS only (no session)")
             
-            # Infer metadata from query for Global FAISS filtering
-            from services.query_metadata_service import infer_query_metadata
-            inferred_metadata = infer_query_metadata(retrieval_query)
-            
-            # Apply metadata filtering if confident
-            if inferred_metadata.get("confidence") in ["high", "medium"]:
-                dept = inferred_metadata.get("department")
-                doc_type = inferred_metadata.get("document_type")
+            # Priority: Frontend metadata > LLM inference
+            if department or document_type:
+                # Frontend provided metadata - use it directly
+                logger.info(f"Using frontend-provided metadata - dept: {department}, type: {document_type}")
+                dept = department
+                doc_type = document_type
+                use_filtering = True
+            else:
+                # No frontend metadata - infer from query using LLM
+                from services.query_metadata_service import infer_query_metadata
+                inferred_metadata = infer_query_metadata(retrieval_query)
                 
-                if dept or doc_type:
-                    logger.info(f"Applying metadata filter - dept: {dept}, type: {doc_type}")
-                    
-                    # Build filter function for FAISS
-                    def metadata_filter(doc_metadata):
-                        match = True
-                        if dept and doc_metadata.get("department") != dept:
-                            match = False
-                        if doc_type and doc_metadata.get("document_type") != doc_type:
-                            match = False
-                        return match
-                    
-                    # Try filtered search first
-                    try:
-                        retrieved_docs = db.similarity_search(
-                            retrieval_query, 
-                            k=7,
-                            filter=metadata_filter
-                        )
-                        
-                        # Fallback to unfiltered if no results
-                        if not retrieved_docs:
-                            logger.warning("Metadata filter returned no results, falling back to unfiltered search")
-                            retrieved_docs = db.similarity_search(retrieval_query, k=5)
-                        else:
-                            logger.info(f"Metadata filter returned {len(retrieved_docs)} results")
-                            retrieved_docs = retrieved_docs[:5]  # Take top 5
-                    except Exception as e:
-                        logger.warning(f"Metadata filtering failed: {str(e)}, using unfiltered search")
-                        retrieved_docs = db.similarity_search(retrieval_query, k=5)
+                # Only use if confident
+                if inferred_metadata.get("confidence") in ["high", "medium"]:
+                    dept = inferred_metadata.get("department")
+                    doc_type = inferred_metadata.get("document_type")
+                    use_filtering = bool(dept or doc_type)
+                    if use_filtering:
+                        logger.info(f"Using LLM-inferred metadata - dept: {dept}, type: {doc_type}, confidence: {inferred_metadata.get('confidence')}")
                 else:
-                    # No metadata to filter on
+                    dept = None
+                    doc_type = None
+                    use_filtering = False
+                    logger.info("Low confidence in metadata inference, using unfiltered search")
+            
+            # Apply filtering if we have metadata (from frontend or LLM)
+            if use_filtering:
+                logger.info(f"Applying metadata filter - dept: {dept}, type: {doc_type}")
+                
+                # Build filter function for FAISS
+                def metadata_filter(doc_metadata):
+                    match = True
+                    if dept and doc_metadata.get("department") != dept:
+                        match = False
+                    if doc_type and doc_metadata.get("document_type") != doc_type:
+                        match = False
+                    return match
+                
+                # Try filtered search first
+                try:
+                    retrieved_docs = db.similarity_search(
+                        retrieval_query, 
+                        k=7,
+                        filter=metadata_filter
+                    )
+                    
+                    # Fallback to unfiltered if no results
+                    if not retrieved_docs:
+                        logger.warning("Metadata filter returned no results, falling back to unfiltered search")
+                        retrieved_docs = db.similarity_search(retrieval_query, k=5)
+                    else:
+                        logger.info(f"Metadata filter returned {len(retrieved_docs)} results")
+                        retrieved_docs = retrieved_docs[:5]  # Take top 5
+                except Exception as e:
+                    logger.warning(f"Metadata filtering failed: {str(e)}, using unfiltered search")
                     retrieved_docs = db.similarity_search(retrieval_query, k=5)
             else:
-                # Low confidence or no inference - use unfiltered search
-                logger.info("Low confidence in metadata inference, using unfiltered search")
+                # No metadata available - use unfiltered search
                 retrieved_docs = db.similarity_search(retrieval_query, k=5)
         
         # Create chain with appropriate retriever (SESSION or GLOBAL)

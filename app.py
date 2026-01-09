@@ -403,7 +403,9 @@ async def rectification(request: QueryRequestFile, background_tasks: BackgroundT
             json_results, rectification_text = process_snag_query_json(
                 chain, db, search_query, final_query, conversation_context,
                 session_manager=session_manager,
-                citation_session_id=session_id
+                citation_session_id=session_id,
+                department=request.department,
+                document_type=request.document_type
             )
             
             # Add conversation memory to SESSION_FAISS (in background)
