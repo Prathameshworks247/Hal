@@ -68,28 +68,30 @@ def parse_pdf(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200, 
     documents = []
     file_name = os.path.basename(file_path)
     
-    # If OCR mode is enabled, use OCR service
+    # If OCR mode is enabled, use TrOCR service
     if use_ocr:
-        from services.ocr_service import ocr_pdf_document, is_tesseract_installed
+        from services.ocr_service import ocr_pdf_document, is_trocr_available
         
-        if not is_tesseract_installed():
-            raise ImportError("Tesseract OCR not installed. Install: apt-get install tesseract-ocr (Linux) or brew install tesseract (Mac)")
+        if not is_trocr_available():
+            raise ImportError("TrOCR not available. Install: pip install transformers torch pillow")
         
-        logger.info(f"🔍 Using OCR mode for: {file_name}")
-        ocr_result = ocr_pdf_document(file_path)
+        logger.info(f"🔍 Using TrOCR mode for: {file_name}")
+        # Use "auto" to automatically detect printed vs handwritten
+        ocr_result = ocr_pdf_document(file_path, model_type="auto")
         
         if not ocr_result.get("success"):
             error_msg = ocr_result.get("error", "Unknown OCR error")
-            logger.error(f"OCR failed: {error_msg}")
-            raise RuntimeError(f"OCR processing failed: {error_msg}")
+            logger.error(f"TrOCR failed: {error_msg}")
+            raise RuntimeError(f"TrOCR processing failed: {error_msg}")
         
-        logger.info(f"✓ OCR completed: {ocr_result['processed_pages']} pages, avg confidence: {ocr_result['avg_confidence']}%")
+        logger.info(f"✓ TrOCR completed: {ocr_result['processed_pages']} pages, avg confidence: {ocr_result['avg_confidence']}%, engine: {ocr_result.get('ocr_engine', 'TrOCR')}")
         
         # Process OCR results into documents
         for page_result in ocr_result["pages"]:
             if page_result["success"] and page_result["text"]:
                 text = page_result["text"]
                 page_num = page_result["page_number"]
+                model_type = page_result.get("model_type", "printed")
                 
                 # Chunk the OCR text
                 chunks = _chunk_text(text, chunk_size, chunk_overlap)
@@ -104,14 +106,16 @@ def parse_pdf(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200, 
                             "total_chunks_in_page": len(chunks),
                             "file_type": "pdf",
                             "ocr_applied": True,
+                            "ocr_engine": "TrOCR",
+                            "ocr_model_type": model_type,
                             "ocr_confidence": page_result["confidence"],
                             "ingestion_timestamp": datetime.now().isoformat(),
                             "total_pages": ocr_result["total_pages"],
-                            "citation": f"{file_name}, Page {page_num} (OCR)"
+                            "citation": f"{file_name}, Page {page_num} (TrOCR-{model_type})"
                         }
                     ))
         
-        logger.info(f"✓ Created {len(documents)} OCR document chunks from {file_name}")
+        logger.info(f"✓ Created {len(documents)} TrOCR document chunks from {file_name}")
         return documents
     
     # Standard native PDF processing (non-OCR mode)

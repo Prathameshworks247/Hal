@@ -92,12 +92,10 @@ torchvision>=0.15.0  # For image preprocessing
 # Image Processing
 Pillow>=10.0.0  # PIL for image loading and manipulation
 
-# OCR Support (optional but recommended)
-pytesseract>=0.3.10  # Python wrapper for Tesseract OCR
-# Note: Requires Tesseract binary installed on system
-# macOS: brew install tesseract
-# Ubuntu: sudo apt-get install tesseract-ocr
-# Windows: Download from https://github.com/UB-Mannheim/tesseract/wiki
+# OCR Support - TrOCR (Transformer-based OCR)
+# TrOCR is already covered by transformers>=4.30.0 above
+# No additional system dependencies required - fully offline operation
+# Models: microsoft/trocr-base-printed, microsoft/trocr-base-handwritten
 
 # Additional image utilities
 scikit-image>=0.21.0  # For advanced image preprocessing (optional)

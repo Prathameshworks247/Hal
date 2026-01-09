@@ -738,13 +738,13 @@ async def store_file(request: ExcelFileInput = Depends()):
         if file_ext == '.pdf' and request.is_scanned:
             from services.ocr_service import get_ocr_status
             ocr_check = get_ocr_status()
-            if ocr_check["tesseract_installed"]:
-                logger.info(f"📄 Scanned PDF detected: {file_name} - OCR will be applied during parsing")
-                ocr_status = "OCR will be applied during indexing"
+            if ocr_check["trocr_available"]:
+                logger.info(f"📄 Scanned PDF detected: {file_name} - TrOCR will be applied during parsing")
+                ocr_status = f"TrOCR will be applied during indexing (model: {ocr_check.get('current_model', 'auto')})"
                 use_ocr = True
             else:
-                logger.warning("Tesseract OCR not installed. Cannot process scanned PDF.")
-                ocr_status = "WARNING: Tesseract not installed - file saved but OCR unavailable"
+                logger.warning("TrOCR not available. Cannot process scanned PDF.")
+                ocr_status = "WARNING: TrOCR not available - install: pip install transformers torch pillow"
 
         # Parse document and create embeddings for SESSION_FAISS
         from services.document_parser import parse_document
@@ -879,17 +879,23 @@ async def analyse(request: QueryRequestFile) -> Dict[Any, Any]:
 
 @app.get("/system/ocr-status")
 async def get_ocr_status_endpoint():
-    """Get OCR system status and check if Tesseract is installed."""
+    """Get OCR system status and check if TrOCR is available."""
     from services.ocr_service import get_ocr_status
     
     status = get_ocr_status()
     return {
-        "ocr_available": status["tesseract_installed"],
+        "ocr_available": status["trocr_available"],
+        "ocr_engine": "TrOCR",
+        "model_loaded": status["trocr_model_loaded"],
+        "current_model": status.get("current_model", None),
+        "model_type": status.get("trocr_model_type", None),
+        "supported_models": status["supported_models"],
+        "handwritten_support": status["handwritten_support"],
+        "offline_capable": status["offline_capable"],
         "details": status,
         "instructions": {
-            "linux": "sudo apt-get install tesseract-ocr",
-            "mac": "brew install tesseract",
-            "windows": "Download from: https://github.com/UB-Mannheim/tesseract/wiki"
+            "pip": "pip install transformers torch pillow",
+            "note": "TrOCR models download automatically from HuggingFace on first use"
         }
     }
 
