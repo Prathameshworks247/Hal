@@ -73,7 +73,9 @@ class IncrementalLearningManager:
     def add_documents(
         self,
         documents: List[Document],
-        source_file: Optional[str] = None
+        source_file: Optional[str] = None,
+        department: Optional[str] = None,
+        document_type: Optional[str] = None
     ) -> bool:
         """
         Add new documents to existing vector store incrementally.
@@ -81,6 +83,8 @@ class IncrementalLearningManager:
         Args:
             documents: List of documents to add
             source_file: Optional source file path for tracking
+            department: Department classification for this source
+            document_type: Document type classification for this source
         
         Returns:
             True if successful, False otherwise
@@ -112,11 +116,17 @@ class IncrementalLearningManager:
             self.metadata["total_documents"] += len(documents)
             
             if source_file:
-                self.metadata["document_sources"][source_file] = {
+                source_metadata = {
                     "added_at": datetime.now().isoformat(),
                     "num_docs": len(documents),
                     "version": self.metadata["version"]
                 }
+                if department:
+                    source_metadata["department"] = department
+                if document_type:
+                    source_metadata["document_type"] = document_type
+                
+                self.metadata["document_sources"][source_file] = source_metadata
             
             self.metadata["update_history"].append({
                 "timestamp": datetime.now().isoformat(),
@@ -249,7 +259,10 @@ def create_or_update_index(
     documents: List[Document],
     index_path: str,
     embeddings: Optional[HuggingFaceEmbeddings] = None,
-    incremental: bool = True
+    incremental: bool = True,
+    source_file: Optional[str] = None,
+    department: Optional[str] = None,
+    document_type: Optional[str] = None
 ) -> bool:
     """
     Create new index or update existing one incrementally.
@@ -259,6 +272,9 @@ def create_or_update_index(
         index_path: Path to FAISS index
         embeddings: Embeddings model
         incremental: If True and index exists, add incrementally; if False, rebuild
+        source_file: Source file path for metadata tracking
+        department: Department classification
+        document_type: Document type classification
     
     Returns:
         True if successful
@@ -278,7 +294,12 @@ def create_or_update_index(
             # Incremental update
             logger.info("Updating existing index incrementally...")
             manager = IncrementalLearningManager(index_path, embeddings)
-            return manager.add_documents(documents)
+            return manager.add_documents(
+                documents, 
+                source_file=source_file,
+                department=department,
+                document_type=document_type
+            )
         else:
             # Create new index
             logger.info("Creating new index...")
