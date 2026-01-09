@@ -10,8 +10,17 @@ from pathlib import Path
 from datetime import datetime
 from langchain.schema import Document
 import io
+import hashlib
 
 logger = logging.getLogger(__name__)
+
+# Token-based chunking
+try:
+    import tiktoken
+    TIKTOKEN_AVAILABLE = True
+except ImportError:
+    TIKTOKEN_AVAILABLE = False
+    logger.warning("tiktoken not available. Install: pip install tiktoken")
 
 # PDF parsing
 try:
@@ -48,7 +57,7 @@ except ImportError:
     logger.warning("PIL/Pillow not available. Image extraction will be limited.")
 
 
-def parse_pdf(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200, use_ocr: bool = False) -> List[Document]:
+def parse_pdf(file_path: str, chunk_size: int = 450, chunk_overlap: int = 80, use_ocr: bool = False) -> List[Document]:
     """
     Parse PDF file with page-level tracking and smart chunking.
     Supports both native PDFs and scanned PDFs (via OCR).
@@ -91,9 +100,10 @@ def parse_pdf(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200, 
                 text = page_result["text"]
                 page_num = page_result["page_number"]
                 
-                # Chunk the OCR text
-                chunks = _chunk_text(text, chunk_size, chunk_overlap)
+                # Chunk the OCR text (token-based)
+                chunks = _chunk_text(text, chunk_size, chunk_overlap, use_tokens=True)
                 for chunk_idx, chunk in enumerate(chunks):
+                    chunk_id = _generate_chunk_id(chunk, file_name, chunk_idx)
                     documents.append(Document(
                         page_content=chunk,
                         metadata={
@@ -101,6 +111,7 @@ def parse_pdf(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200, 
                             "file_path": file_path,
                             "page_number": page_num,
                             "chunk_index": chunk_idx,
+                            "chunk_id": chunk_id,
                             "total_chunks_in_page": len(chunks),
                             "file_type": "pdf",
                             "ocr_applied": True,
@@ -123,9 +134,10 @@ def parse_pdf(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200, 
                 for page_num, page in enumerate(pdf.pages, start=1):
                     text = page.extract_text()
                     if text and text.strip():
-                        # Chunk the page text
-                        chunks = _chunk_text(text, chunk_size, chunk_overlap)
+                        # Chunk the page text (token-based)
+                        chunks = _chunk_text(text, chunk_size, chunk_overlap, use_tokens=True)
                         for chunk_idx, chunk in enumerate(chunks):
+                            chunk_id = _generate_chunk_id(chunk, file_name, chunk_idx)
                             documents.append(Document(
                                 page_content=chunk,
                                 metadata={
@@ -133,6 +145,7 @@ def parse_pdf(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200, 
                                     "file_path": file_path,
                                     "page_number": page_num,
                                     "chunk_index": chunk_idx,
+                                    "chunk_id": chunk_id,
                                     "total_chunks_in_page": len(chunks),
                                     "file_type": "pdf",
                                     "ingestion_timestamp": datetime.now().isoformat(),
@@ -150,9 +163,10 @@ def parse_pdf(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200, 
                 
                 # Rule 1: If page has text → treat as text (authoritative)
                 if text and text.strip():
-                    # Chunk the page text (unchanged - remains authoritative)
-                    chunks = _chunk_text(text, chunk_size, chunk_overlap)
+                    # Chunk the page text (token-based)
+                    chunks = _chunk_text(text, chunk_size, chunk_overlap, use_tokens=True)
                     for chunk_idx, chunk in enumerate(chunks):
+                        chunk_id = _generate_chunk_id(chunk, file_name, chunk_idx)
                         documents.append(Document(
                             page_content=chunk,
                             metadata={
@@ -160,6 +174,7 @@ def parse_pdf(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200, 
                                 "file_path": file_path,
                                 "page_number": page_num + 1,
                                 "chunk_index": chunk_idx,
+                                "chunk_id": chunk_id,
                                 "total_chunks_in_page": len(chunks),
                                 "file_type": "pdf",
                                 "ingestion_timestamp": datetime.now().isoformat(),
@@ -212,7 +227,7 @@ def parse_pdf(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200, 
         raise
 
 
-def parse_docx(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200) -> List[Document]:
+def parse_docx(file_path: str, chunk_size: int = 450, chunk_overlap: int = 80) -> List[Document]:
     """
     Parse DOCX file with paragraph-level tracking and smart chunking.
     
@@ -247,11 +262,12 @@ def parse_docx(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200)
             logger.warning(f"No text content found in DOCX: {file_path}")
             documents = []
         else:
-            # Combine paragraphs and chunk (unchanged - authoritative text)
+            # Combine paragraphs and chunk (token-based)
             full_text = "\n\n".join([p["text"] for p in paragraphs])
-            chunks = _chunk_text(full_text, chunk_size, chunk_overlap)
+            chunks = _chunk_text(full_text, chunk_size, chunk_overlap, use_tokens=True)
             
             for chunk_idx, chunk in enumerate(chunks):
+                chunk_id = _generate_chunk_id(chunk, file_name, chunk_idx)
                 # Determine which paragraphs are in this chunk
                 start_para = _find_paragraph_for_chunk(chunk, paragraphs, chunk_idx, len(chunks))
                 
@@ -262,6 +278,7 @@ def parse_docx(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200)
                         "file_path": file_path,
                         "paragraph_start": start_para,
                         "chunk_index": chunk_idx,
+                        "chunk_id": chunk_id,
                         "total_chunks": len(chunks),
                         "file_type": "docx",
                         "ingestion_timestamp": datetime.now().isoformat(),
@@ -314,7 +331,7 @@ def parse_docx(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200)
         raise
 
 
-def parse_txt(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200) -> List[Document]:
+def parse_txt(file_path: str, chunk_size: int = 450, chunk_overlap: int = 80) -> List[Document]:
     """
     Parse TXT file with encoding detection and smart chunking.
     
@@ -356,11 +373,12 @@ def parse_txt(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200) 
         
         # Split into lines for better chunking
         lines = text.split('\n')
-        chunks = _chunk_text(text, chunk_size, chunk_overlap)
+        chunks = _chunk_text(text, chunk_size, chunk_overlap, use_tokens=True)
         
         for chunk_idx, chunk in enumerate(chunks):
             # Estimate line range for this chunk
             start_line = _estimate_line_number(chunk, lines, chunk_idx, len(chunks))
+            chunk_id = _generate_chunk_id(chunk, file_name, chunk_idx)
             
             documents.append(Document(
                 page_content=chunk,
@@ -369,6 +387,7 @@ def parse_txt(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200) 
                     "file_path": file_path,
                     "line_start": start_line,
                     "chunk_index": chunk_idx,
+                    "chunk_id": chunk_id,
                     "total_chunks": len(chunks),
                     "file_type": "txt",
                     "encoding": used_encoding,
@@ -431,7 +450,7 @@ def parse_excel(file_path: str) -> List[Document]:
         raise
 
 
-def parse_document(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200, use_ocr: bool = False) -> List[Document]:
+def parse_document(file_path: str, chunk_size: int = 450, chunk_overlap: int = 80, use_ocr: bool = False) -> List[Document]:
     """
     Universal document parser that automatically detects file type and parses accordingly.
     
@@ -677,9 +696,108 @@ def _extract_images_from_docx(file_path: str) -> List[Tuple[bytes, Dict[str, Any
     return images
 
 
-def _chunk_text(text: str, chunk_size: int, chunk_overlap: int) -> List[str]:
+def _chunk_text(text: str, chunk_size: int = 450, chunk_overlap: int = 80, use_tokens: bool = True) -> List[str]:
     """
     Split text into chunks with overlap for context preservation.
+    Uses token-based chunking with tiktoken for accurate token counting.
+    Preserves sentence boundaries when possible for better semantic coherence.
+    
+    Args:
+        text: Text to chunk
+        chunk_size: Number of tokens per chunk (default: 450)
+        chunk_overlap: Number of tokens to overlap between chunks (default: 80)
+        use_tokens: If True, use token-based chunking; if False, use character-based (legacy)
+    
+    Returns:
+        List of text chunks
+    """
+    if not text or not text.strip():
+        return []
+    
+    # Use token-based chunking if tiktoken is available
+    if use_tokens and TIKTOKEN_AVAILABLE:
+        return _chunk_text_tokens(text, chunk_size, chunk_overlap)
+    else:
+        # Fallback to character-based chunking (legacy)
+        return _chunk_text_chars(text, chunk_size, chunk_overlap)
+
+
+def _chunk_text_tokens(text: str, chunk_size: int = 450, chunk_overlap: int = 80) -> List[str]:
+    """
+    Token-based chunking using tiktoken.
+    Preserves sentence boundaries when possible.
+    """
+    try:
+        # Use cl100k_base encoding (GPT-4 tokenizer, works well for general text)
+        encoding = tiktoken.get_encoding("cl100k_base")
+    except Exception as e:
+        logger.warning(f"Failed to load tiktoken encoding, falling back to character-based: {e}")
+        return _chunk_text_chars(text, chunk_size, chunk_overlap)
+    
+    # Encode text to tokens
+    tokens = encoding.encode(text)
+    
+    if len(tokens) <= chunk_size:
+        return [text]
+    
+    chunks = []
+    start_idx = 0
+    
+    while start_idx < len(tokens):
+        end_idx = start_idx + chunk_size
+        
+        if end_idx >= len(tokens):
+            # Last chunk - decode remaining tokens
+            chunk_tokens = tokens[start_idx:]
+            chunk_text = encoding.decode(chunk_tokens).strip()
+            if chunk_text:
+                chunks.append(chunk_text)
+            break
+        
+        # Try to break at sentence boundary
+        # Look for sentence endings in the text corresponding to tokens
+        chunk_tokens = tokens[start_idx:end_idx]
+        chunk_text = encoding.decode(chunk_tokens)
+        
+        # Find last sentence boundary
+        sentence_end = max(
+            chunk_text.rfind('.'),
+            chunk_text.rfind('!'),
+            chunk_text.rfind('?'),
+            chunk_text.rfind('\n\n')  # Paragraph break
+        )
+        
+        if sentence_end > len(chunk_text) * 0.5:  # Only if we're past halfway
+            # Adjust end_idx to match sentence boundary
+            # Re-encode the text up to sentence end to get token count
+            adjusted_text = chunk_text[:sentence_end + 1]
+            adjusted_tokens = encoding.encode(adjusted_text)
+            end_idx = start_idx + len(adjusted_tokens)
+            chunk_tokens = tokens[start_idx:end_idx]
+            chunk_text = encoding.decode(chunk_tokens).strip()
+        else:
+            # Try word boundary
+            word_end = chunk_text.rfind(' ')
+            if word_end > len(chunk_text) * 0.7:  # Only if we're past 70%
+                adjusted_text = chunk_text[:word_end]
+                adjusted_tokens = encoding.encode(adjusted_text)
+                end_idx = start_idx + len(adjusted_tokens)
+                chunk_tokens = tokens[start_idx:end_idx]
+                chunk_text = encoding.decode(chunk_tokens).strip()
+        
+        if chunk_text:
+            chunks.append(chunk_text)
+        
+        # Move start forward with overlap
+        start_idx = end_idx - chunk_overlap if chunk_overlap > 0 else end_idx
+        start_idx = max(0, start_idx)  # Ensure non-negative
+    
+    return chunks
+
+
+def _chunk_text_chars(text: str, chunk_size: int, chunk_overlap: int) -> List[str]:
+    """
+    Character-based chunking (legacy fallback).
     Uses sentence boundaries when possible for better semantic coherence.
     """
     if len(text) <= chunk_size:
@@ -722,6 +840,14 @@ def _chunk_text(text: str, chunk_size: int, chunk_overlap: int) -> List[str]:
         start = end - chunk_overlap if chunk_overlap > 0 else end
     
     return chunks
+
+
+def _generate_chunk_id(text: str, source: str, chunk_idx: int) -> str:
+    """
+    Generate a unique chunk ID based on content hash.
+    """
+    content_hash = hashlib.md5(text.encode()).hexdigest()[:8]
+    return f"{source}_{chunk_idx}_{content_hash}"
 
 
 def _find_paragraph_for_chunk(chunk: str, paragraphs: List[Dict], chunk_idx: int, total_chunks: int) -> int:

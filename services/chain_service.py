@@ -70,8 +70,16 @@ def get_chain(department: Optional[str] = None):
         )
         logger.info(f"FAISS index loaded successfully from {faiss_index_path}.")
 
-        retriever = db.as_retriever(search_type="similarity", search_kwargs={"k": 5}) 
-        logger.info("Retriever configured successfully.")
+        # Use MMR (Max Marginal Relevance) for better diversity
+        retriever = db.as_retriever(
+            search_type="mmr",
+            search_kwargs={
+                "k": 5,  # Number of documents to return
+                "fetch_k": 15,  # Number of documents to fetch before MMR
+                "lambda_mult": 0.5  # Diversity vs relevance (0.0 = max diversity, 1.0 = max relevance)
+            }
+        )
+        logger.info("MMR retriever configured successfully (k=5, fetch_k=15, lambda_mult=0.5).")
 
         
         prompt = PromptTemplate.from_template(
@@ -170,13 +178,14 @@ IMPORTANT:
         llm = get_llm()
         logger.info("LLM instance obtained successfully.")
 
-        # Create the QA chain with proper input/output keys
+        # Create the QA chain with "refine" for better quality on long contexts
         qa_chain = RetrievalQA.from_chain_type(
             llm=llm,
-            chain_type="stuff",
+            chain_type="refine",  # Better for long contexts, processes chunks iteratively
             retriever=retriever,
             chain_type_kwargs={
-                "prompt": prompt,
+                "question_prompt": prompt,  # Initial prompt for first chunk
+                "refine_prompt": prompt,  # Refinement prompt for subsequent chunks
                 "verbose": True  # Enable verbose mode for debugging
             },
             return_source_documents=True,  # Return source documents for transparency
@@ -307,7 +316,15 @@ IMPORTANT:
             embedding=embeddings,
         )
 
-        retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 5})
+        # Use MMR (Max Marginal Relevance) for better diversity
+        retriever = vectorstore.as_retriever(
+            search_type="mmr",
+            search_kwargs={
+                "k": 5,
+                "fetch_k": 15,
+                "lambda_mult": 0.5
+            }
+        )
 
         logger.info("Getting LLM instance...")
         llm = get_llm()
@@ -315,9 +332,13 @@ IMPORTANT:
 
         qa_chain = RetrievalQA.from_chain_type(
             llm=llm,
-            chain_type="stuff",
+            chain_type="refine",
             retriever=retriever,
-            chain_type_kwargs={"prompt": prompt, "verbose": True},
+            chain_type_kwargs={
+                "question_prompt": prompt,
+                "refine_prompt": prompt,
+                "verbose": True
+            },
             return_source_documents=True,
             input_key="question",
             output_key="result"
@@ -434,14 +455,26 @@ IMPORTANT:
 - Your response must be valid JSON that can be parsed directly
 """)
     
-    retriever = db.as_retriever(search_type="similarity", search_kwargs={"k": 5})
+    # Use MMR (Max Marginal Relevance) for better diversity
+    retriever = db.as_retriever(
+        search_type="mmr",
+        search_kwargs={
+            "k": 5,
+            "fetch_k": 15,
+            "lambda_mult": 0.5
+        }
+    )
     llm = get_llm()
     
     qa_chain = RetrievalQA.from_chain_type(
         llm=llm,
-        chain_type="stuff",
+        chain_type="refine",
         retriever=retriever,
-        chain_type_kwargs={"prompt": prompt, "verbose": True},
+        chain_type_kwargs={
+            "question_prompt": prompt,
+            "refine_prompt": prompt,
+            "verbose": True
+        },
         return_source_documents=True,
         input_key="question",
         output_key="result"

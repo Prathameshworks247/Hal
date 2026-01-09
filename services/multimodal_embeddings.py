@@ -30,12 +30,15 @@ class MultimodalEmbeddingManager:
     - Cross-modal retrieval with score fusion
     """
     
-    def __init__(self, model_path: str = "./all-MiniLM-L6-v2", device: str = "cpu"):
+    def __init__(self, model_path: str = "nomic-ai/nomic-embed-text-v1.5", device: str = "cpu"):
         """
         Initialize the multimodal embedding manager.
         
+        Uses nomic-embed-text-v1.5 by default (stronger than MiniLM, offline-capable).
+        Alternative: "BAAI/bge-small-en-v1.5"
+        
         Args:
-            model_path: Path to the text embedding model
+            model_path: HuggingFace model path or local path to the text embedding model
             device: Device to run embeddings on ('cpu' or 'cuda')
         """
         self.model_path = model_path
@@ -46,16 +49,36 @@ class MultimodalEmbeddingManager:
         """
         Get or create the embeddings model.
         
+        Uses nomic-embed-text-v1.5 or bge-small-en-v1.5 for better quality.
+        Models are loaded from HuggingFace cache (offline-capable).
+        
         Returns:
             HuggingFaceEmbeddings instance
         """
         if self.embeddings is None:
             logger.info(f"Loading text embedding model: {self.model_path}")
-            self.embeddings = HuggingFaceEmbeddings(
-                model_name=self.model_path,
-                model_kwargs={'device': self.device}
-            )
-            logger.info("Text embedding model loaded successfully")
+            # Use trust_remote_code for models that require it (like nomic)
+            try:
+                self.embeddings = HuggingFaceEmbeddings(
+                    model_name=self.model_path,
+                    model_kwargs={
+                        'device': self.device,
+                        'trust_remote_code': True  # Required for nomic-embed-text-v1.5
+                    },
+                    encode_kwargs={
+                        'normalize_embeddings': True  # Normalize for better similarity search
+                    }
+                )
+                logger.info(f"✓ Text embedding model loaded successfully: {self.model_path}")
+            except Exception as e:
+                logger.warning(f"Failed to load {self.model_path}, falling back to bge-small-en-v1.5: {e}")
+                # Fallback to bge-small-en-v1.5
+                self.embeddings = HuggingFaceEmbeddings(
+                    model_name="BAAI/bge-small-en-v1.5",
+                    model_kwargs={'device': self.device},
+                    encode_kwargs={'normalize_embeddings': True}
+                )
+                logger.info("✓ Fallback embedding model loaded: BAAI/bge-small-en-v1.5")
         return self.embeddings
     
     def embed_documents(self, documents: List[Document]) -> List[Document]:
@@ -169,7 +192,7 @@ class MultimodalEmbeddingManager:
         return stats
 
 
-def get_multimodal_embeddings(model_path: str = "./all-MiniLM-L6-v2", device: str = "cpu") -> HuggingFaceEmbeddings:
+def get_multimodal_embeddings(model_path: str = "nomic-ai/nomic-embed-text-v1.5", device: str = "cpu") -> HuggingFaceEmbeddings:
     """
     Get embeddings for multimodal RAG.
     
