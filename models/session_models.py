@@ -2,7 +2,7 @@
 Session-related Pydantic models for ephemeral FAISS memory management.
 """
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 
@@ -12,8 +12,9 @@ class SessionMetadata(BaseModel):
     created_at: datetime = Field(default_factory=datetime.now)
     last_accessed: datetime = Field(default_factory=datetime.now)
     has_uploaded_file: bool = False
-    uploaded_file_name: Optional[str] = None
-    uploaded_file_type: Optional[str] = None
+    uploaded_file_name: Optional[str] = None  # Legacy: first file name (for backward compatibility)
+    uploaded_file_type: Optional[str] = None  # Legacy: first file type (for backward compatibility)
+    uploaded_files: List[Dict[str, Any]] = Field(default_factory=list)  # New: track all uploaded files
     conversation_turns: int = 0
     document_chunks: int = 0
     total_embeddings: int = 0

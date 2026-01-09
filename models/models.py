@@ -37,6 +37,9 @@ class GetRows(BaseModel):
     filename: str
 
 class ExcelFileInput:
+    """
+    Single file input model (legacy, backward compatible).
+    """
     def __init__(
         self,
         file: UploadFile = File(...),
@@ -45,6 +48,24 @@ class ExcelFileInput:
         session_id: Optional[str] = Form(None)
     ):
         self.file = file
+        self.files = [file]  # For compatibility with multi-file code
+        self.pb_number = pb_number
+        self.is_scanned = is_scanned
+        self.session_id = session_id
+
+
+class MultiFileInput:
+    """
+    Multiple file input model (new).
+    """
+    def __init__(
+        self,
+        files: List[UploadFile] = File(...),
+        pb_number: str = Form(...),
+        is_scanned: bool = Form(False),
+        session_id: Optional[str] = Form(None)
+    ):
+        self.files = files if isinstance(files, list) else [files]
         self.pb_number = pb_number
         self.is_scanned = is_scanned
         self.session_id = session_id

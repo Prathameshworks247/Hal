@@ -716,6 +716,176 @@ def get_unique_row(request: GetRows):
         logger.exception("Error retrieving unique column values")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
+@app.post("/user/store-files")
+async def store_files(
+    files: List[UploadFile] = File(...),
+    pb_number: str = Form(...),
+    is_scanned: bool = Form(False),
+    session_id: Optional[str] = Form(None)
+):
+    """
+    Multi-file upload endpoint.
+    Accepts multiple files and embeds all into a single SESSION FAISS index.
+    """
+    try:
+        if not files:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "No files provided"}
+            )
+        
+        # Get or create session_id
+        if not session_id:
+            session_id = str(uuid.uuid4())
+            logger.info(f"Created new session for multi-file upload: {session_id}")
+        else:
+            logger.info(f"Using existing session for multi-file upload: {session_id}")
+        
+        UPLOAD_DIR = f"uploaded_excels/{pb_number}"
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+        
+        # Get supported formats dynamically
+        supported_formats = get_supported_formats()
+        
+        # Process all files
+        from services.document_parser import parse_document
+        from services.session_faiss_manager import SessionFAISSManager
+        from services.multimodal_embeddings import get_multimodal_embeddings
+        from services.ocr_service import get_ocr_status, is_tesseract_installed, detect_scanned_pdf
+        
+        # Initialize SessionFAISSManager once for all files
+        embeddings = get_multimodal_embeddings(model_path="./all-MiniLM-L6-v2", device='cpu')
+        session_manager = SessionFAISSManager(session_id, embeddings)
+        
+        processed_files = []
+        failed_files = []
+        total_chunks = 0
+        ocr_statuses = {}
+        
+        for file in files:
+            try:
+                file_ext = os.path.splitext(file.filename)[1].lower()
+                
+                if file_ext not in supported_formats:
+                    failed_files.append({
+                        "file_name": file.filename,
+                        "error": f"Unsupported file format: {file_ext}"
+                    })
+                    continue
+                
+                # Save file
+                file_name = f"{os.path.splitext(file.filename)[0]}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}{file_ext}"
+                file_location = os.path.join(UPLOAD_DIR, file_name)
+                
+                with open(file_location, "wb") as buffer:
+                    shutil.copyfileobj(file.file, buffer)
+                
+                # Handle OCR detection for PDFs
+                use_ocr = False
+                ocr_status = None
+                
+                if file_ext == '.pdf':
+                    if is_scanned:
+                        ocr_check = get_ocr_status()
+                        if ocr_check.get("tesseract_installed", False):
+                            use_ocr = True
+                            ocr_status = "Tesseract OCR will be applied"
+                        else:
+                            ocr_status = "WARNING: Tesseract OCR not installed"
+                    else:
+                        # Auto-detect
+                        try:
+                            is_scanned_pdf, detection_info = detect_scanned_pdf(file_location)
+                            if is_scanned_pdf:
+                                ocr_check = get_ocr_status()
+                                if ocr_check.get("tesseract_installed", False):
+                                    use_ocr = True
+                                    ocr_status = "Auto-detected scanned PDF - Tesseract OCR will be applied"
+                        except Exception as e:
+                            logger.warning(f"Could not auto-detect PDF type for {file.filename}: {str(e)}")
+                
+                # Parse document
+                logger.info(f"Parsing file: {file.filename} (session: {session_id})")
+                documents = parse_document(file_location, use_ocr=use_ocr)
+                
+                if not documents:
+                    failed_files.append({
+                        "file_name": file.filename,
+                        "error": "No content could be extracted"
+                    })
+                    continue
+                
+                # Ensure metadata includes session_id, source_file, and citation with original filename
+                for doc in documents:
+                    doc.metadata["session_id"] = session_id
+                    doc.metadata["source_file"] = file.filename  # Original filename
+                    # Update citation to use original filename (not timestamped stored name)
+                    page_num = doc.metadata.get("page_number")
+                    if page_num:
+                        citation = f"{file.filename}, Page {page_num}"
+                    else:
+                        citation = file.filename
+                    doc.metadata["citation"] = citation
+                
+                # Add to SESSION FAISS (incremental)
+                success = session_manager.add_uploaded_file_embeddings(
+                    documents, 
+                    source_file=file.filename
+                )
+                
+                if success:
+                    processed_files.append({
+                        "file_name": file.filename,
+                        "stored_name": file_name,
+                        "file_type": file_ext,
+                        "chunks": len(documents),
+                        "ocr_status": ocr_status
+                    })
+                    total_chunks += len(documents)
+                    if ocr_status:
+                        ocr_statuses[file.filename] = ocr_status
+                else:
+                    failed_files.append({
+                        "file_name": file.filename,
+                        "error": "Failed to create embeddings"
+                    })
+                    
+            except Exception as e:
+                logger.exception(f"Error processing file {file.filename}: {str(e)}")
+                failed_files.append({
+                    "file_name": file.filename,
+                    "error": str(e)
+                })
+        
+        # Update session metadata
+        from services.session_storage import save_session_metadata
+        save_session_metadata(session_id, session_manager.metadata)
+        
+        response_data = {
+            "status": "success" if processed_files else "partial" if failed_files else "failed",
+            "message": f"Processed {len(processed_files)} file(s), {len(failed_files)} failed",
+            "session_id": session_id,
+            "total_files": len(files),
+            "processed": len(processed_files),
+            "failed": len(failed_files),
+            "total_chunks": total_chunks,
+            "files": processed_files,
+            "failed_files": failed_files if failed_files else None,
+            "ocr_statuses": ocr_statuses if ocr_statuses else None,
+            "storage_location": "session"
+        }
+        
+        logger.info(f"✓ Multi-file upload complete: {len(processed_files)}/{len(files)} files, {total_chunks} total chunks in session {session_id}")
+        return JSONResponse(content=response_data)
+        
+    except Exception as e:
+        logger.exception("Error during multi-file upload")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
+
+
 @app.post("/user/store-file")
 async def store_file(request: ExcelFileInput = Depends()):
     try:
@@ -870,10 +1040,26 @@ async def store_file(request: ExcelFileInput = Depends()):
                 }
             )
         
-        # Add uploaded file embeddings to SESSION_FAISS
-        logger.info(f"Creating embeddings for {len(documents)} document chunks...")
-        try:
-            success = session_manager.add_uploaded_file_embeddings(documents)
+            # Ensure metadata includes session_id, source_file, and citation with original filename
+            original_filename = request.file.filename
+            for doc in documents:
+                doc.metadata["session_id"] = session_id
+                doc.metadata["source_file"] = original_filename  # Original filename (not timestamped)
+                # Update citation to use original filename
+                page_num = doc.metadata.get("page_number")
+                if page_num:
+                    citation = f"{original_filename}, Page {page_num}"
+                else:
+                    citation = original_filename
+                doc.metadata["citation"] = citation
+            
+            # Add uploaded file embeddings to SESSION_FAISS (incremental)
+            logger.info(f"Creating embeddings for {len(documents)} document chunks...")
+            try:
+                success = session_manager.add_uploaded_file_embeddings(
+                    documents, 
+                    source_file=original_filename  # Use original filename, not timestamped
+                )
             
             if not success:
                 logger.error(f"Failed to create embeddings - add_uploaded_file_embeddings returned False")

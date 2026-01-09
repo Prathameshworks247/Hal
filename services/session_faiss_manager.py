@@ -84,19 +84,21 @@ class SessionFAISSManager:
             logger.error(f"Error initializing session {self.session_id}: {str(e)}")
             raise
     
-    def add_uploaded_file_embeddings(self, documents: List[Document]) -> bool:
+    def add_uploaded_file_embeddings(self, documents: List[Document], source_file: Optional[str] = None) -> bool:
         """
-        Embed user's uploaded file and save to session FAISS.
-        This is called once when the user uploads a file.
+        Embed user's uploaded file(s) and save to session FAISS.
+        Supports incremental addition: appends if FAISS exists, creates new if not.
+        Can be called multiple times for different files in the same session.
         
         Args:
-            documents: List of document chunks from parsed file
+            documents: List of document chunks from parsed file(s)
+            source_file: Original filename for tracking (optional, extracted from metadata if not provided)
             
         Returns:
             True if successful
         """
         try:
-            logger.info(f"Creating embeddings for {len(documents)} document chunks (session: {self.session_id})")
+            logger.info(f"Adding embeddings for {len(documents)} document chunks (session: {self.session_id}, source: {source_file})")
             
             if not documents:
                 logger.error("No documents provided for embedding")
@@ -116,25 +118,52 @@ class SessionFAISSManager:
             
             logger.info(f"Valid documents: {len(valid_documents)}/{len(documents)}")
             
-            # Mark documents as uploaded file content
+            # Extract source_file from metadata if not provided
+            if not source_file and valid_documents:
+                source_file = valid_documents[0].metadata.get("source") or valid_documents[0].metadata.get("source_file")
+            
+            # Ensure all documents have required metadata
             for doc in valid_documents:
+                # Mark as uploaded file content
                 doc.metadata["type"] = "uploaded_file"
                 doc.metadata["authoritative"] = True
                 doc.metadata["session_id"] = self.session_id
+                
+                # Set source_file if not already set
+                if source_file and "source_file" not in doc.metadata:
+                    doc.metadata["source_file"] = source_file
+                
+                # Ensure source_file is in metadata (use source as fallback)
+                if "source_file" not in doc.metadata and "source" in doc.metadata:
+                    doc.metadata["source_file"] = doc.metadata["source"]
             
-            # Create FAISS index from documents
-            logger.info(f"Generating embeddings and creating FAISS index...")
-            try:
-                faiss_index = FAISS.from_documents(valid_documents, self.embeddings)
-                logger.info(f"✓ FAISS index created with {len(valid_documents)} documents")
-            except Exception as e:
-                logger.exception(f"Error creating FAISS index: {str(e)}")
-                raise
+            # Check if FAISS index already exists for this session
+            existing_faiss = self.load_session_faiss()
+            
+            if existing_faiss is None:
+                # Create new FAISS index
+                logger.info(f"Creating new FAISS index with {len(valid_documents)} documents...")
+                try:
+                    faiss_index = FAISS.from_documents(valid_documents, self.embeddings)
+                    logger.info(f"✓ New FAISS index created with {len(valid_documents)} documents")
+                except Exception as e:
+                    logger.exception(f"Error creating new FAISS index: {str(e)}")
+                    raise
+            else:
+                # Append to existing FAISS index
+                logger.info(f"Appending {len(valid_documents)} documents to existing FAISS index...")
+                try:
+                    existing_faiss.add_documents(valid_documents)
+                    faiss_index = existing_faiss
+                    logger.info(f"✓ Appended {len(valid_documents)} documents to existing FAISS index")
+                except Exception as e:
+                    logger.exception(f"Error appending to existing FAISS index: {str(e)}")
+                    raise
             
             # Ensure directory exists
             os.makedirs(os.path.dirname(self.faiss_path), exist_ok=True)
             
-            # Save to disk
+            # Save updated index to disk
             try:
                 faiss_index.save_local(self.faiss_path)
                 logger.info(f"✓ Saved session FAISS to: {self.faiss_path}")
@@ -151,11 +180,39 @@ class SessionFAISSManager:
             
             # Update metadata
             self.metadata.has_uploaded_file = True
-            self.metadata.document_chunks = len(valid_documents)
-            self.metadata.total_embeddings = len(valid_documents)
+            self.metadata.document_chunks += len(valid_documents)
+            self.metadata.total_embeddings += len(valid_documents)
+            
+            # Track uploaded file information
+            file_info = {
+                "file_name": source_file,
+                "file_type": valid_documents[0].metadata.get("file_type"),
+                "chunks": len(valid_documents),
+                "uploaded_at": datetime.now().isoformat()
+            }
+            
+            # Check if file already tracked (avoid duplicates)
+            file_exists = False
+            for existing_file in self.metadata.uploaded_files:
+                if existing_file.get("file_name") == source_file:
+                    # Update existing entry
+                    existing_file.update(file_info)
+                    file_exists = True
+                    break
+            
+            if not file_exists:
+                self.metadata.uploaded_files.append(file_info)
+            
+            # Legacy fields: set to first file for backward compatibility
+            if not self.metadata.uploaded_file_name and source_file:
+                self.metadata.uploaded_file_name = source_file
+            if not self.metadata.uploaded_file_type and file_info.get("file_type"):
+                self.metadata.uploaded_file_type = file_info.get("file_type")
+            
             save_session_metadata(self.session_id, self.metadata)
             
-            logger.info(f"✓ Uploaded file embedded: {len(valid_documents)} chunks in session {self.session_id}")
+            logger.info(f"✓ Uploaded file embedded: {source_file} ({len(valid_documents)} chunks) in session {self.session_id}")
+            logger.info(f"  Total files in session: {len(self.metadata.uploaded_files)}, Total chunks: {self.metadata.document_chunks}")
             return True
             
         except Exception as e:
