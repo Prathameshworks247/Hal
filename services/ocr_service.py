@@ -1,7 +1,6 @@
 """
-OCR Service for extracting text from scanned PDFs using Microsoft TrOCR.
-Supports both printed and handwritten text recognition with transformer-based models.
-Fully offline operation with HuggingFace transformers.
+OCR Service for extracting text from scanned PDFs using Tesseract OCR.
+Supports automatic detection of scanned PDFs and text extraction with confidence scoring.
 """
 import os
 import logging
@@ -11,20 +10,15 @@ import io
 
 logger = logging.getLogger(__name__)
 
-# TrOCR (Transformer-based OCR)
-TROCR_AVAILABLE = False
-_trocr_processor = None
-_trocr_model = None
-_trocr_model_type = None  # 'printed' or 'handwritten'
-
+# Tesseract OCR
 try:
-    from transformers import TrOCRProcessor, VisionEncoderDecoderModel
+    import pytesseract
     from PIL import Image
-    TROCR_AVAILABLE = True
-    logger.info("TrOCR transformers available")
+    TESSERACT_AVAILABLE = True
+    logger.info("Tesseract OCR is available")
 except ImportError:
-    TROCR_AVAILABLE = False
-    logger.warning("TrOCR not available. Install: pip install transformers torch pillow")
+    TESSERACT_AVAILABLE = False
+    logger.warning("Tesseract OCR not available. Install: pip install pytesseract pillow")
 
 # PDF processing for OCR
 try:
@@ -34,336 +28,28 @@ except ImportError:
     PYMUPDF_AVAILABLE = False
     logger.warning("PyMuPDF not available for OCR processing")
 
+# Image preprocessing - DISABLED due to numpy/cv2 segfault on macOS
+# To enable, fix numpy/OpenCV compatibility: pip install --upgrade numpy opencv-python-headless
+CV2_AVAILABLE = False
+logger.warning("OpenCV disabled due to compatibility issues. OCR preprocessing will be limited.")
 
-def initialize_trocr(model_type: str = "printed") -> bool:
+
+def is_tesseract_installed() -> bool:
     """
-    Initialize TrOCR model (lazy loading).
-    Model is loaded only once and cached for reuse.
-    
-    Args:
-        model_type: "printed" or "handwritten" (default: "printed")
+    Check if Tesseract OCR is installed on the system.
     
     Returns:
-        True if model loaded successfully
+        True if Tesseract is installed and accessible
     """
-    global _trocr_processor, _trocr_model, _trocr_model_type
-    
-    if not TROCR_AVAILABLE:
-        logger.error("TrOCR transformers not available. Install: pip install transformers torch pillow")
+    if not TESSERACT_AVAILABLE:
         return False
     
-    # Use cached model if already loaded with same type
-    if _trocr_model is not None and _trocr_model_type == model_type:
+    try:
+        pytesseract.get_tesseract_version()
         return True
-    
-    try:
-        from transformers import TrOCRProcessor, VisionEncoderDecoderModel
-        import torch
-        
-        logger.info(f"Loading TrOCR {model_type} model (first time only)...")
-        
-        # Select model based on type
-        if model_type == "handwritten":
-            model_name = "microsoft/trocr-base-handwritten"
-        else:  # printed (default)
-            model_name = "microsoft/trocr-base-printed"
-        
-        # Load processor and model
-        _trocr_processor = TrOCRProcessor.from_pretrained(model_name)
-        _trocr_model = VisionEncoderDecoderModel.from_pretrained(model_name)
-        
-        # Set to eval mode and CPU for memory efficiency
-        _trocr_model.eval()
-        if torch.cuda.is_available():
-            _trocr_model = _trocr_model.to('cpu')  # Force CPU to save GPU memory
-        else:
-            _trocr_model = _trocr_model.to('cpu')
-        
-        _trocr_model_type = model_type
-        logger.info(f"✓ TrOCR {model_type} model loaded successfully: {model_name}")
-        return True
-        
     except Exception as e:
-        logger.error(f"Failed to load TrOCR model: {str(e)}")
-        _trocr_processor = None
-        _trocr_model = None
-        _trocr_model_type = None
+        logger.warning(f"Tesseract not found in system: {str(e)}")
         return False
-
-
-def is_trocr_available() -> bool:
-    """
-    Check if TrOCR is available and can be used.
-    
-    Returns:
-        True if TrOCR is available
-    """
-    if not TROCR_AVAILABLE:
-        return False
-    
-    # Try to initialize if not already loaded
-    if _trocr_model is None:
-        return initialize_trocr("printed")
-    
-    return _trocr_model is not None
-
-
-def preprocess_image_for_trocr(image: Image.Image) -> Image.Image:
-    """
-    Preprocess image for TrOCR (convert to RGB, resize if needed).
-    
-    Args:
-        image: PIL Image object
-    
-    Returns:
-        Preprocessed PIL Image (RGB format)
-    """
-    # TrOCR requires RGB images
-    if image.mode != 'RGB':
-        image = image.convert('RGB')
-    
-    # TrOCR works best with images that are not too large
-    # Resize if image is very large (max 384px height recommended)
-    max_height = 384
-    if image.height > max_height:
-        ratio = max_height / image.height
-        new_width = int(image.width * ratio)
-        new_height = max_height
-        image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-        logger.debug(f"Resized image from {image.size} to ({new_width}, {new_height})")
-    
-    return image
-
-
-def extract_text_with_trocr(image_data: bytes, 
-                            model_type: str = "printed",
-                            preprocess: bool = True) -> Dict[str, Any]:
-    """
-    Extract text from an image using TrOCR (Transformer-based OCR).
-    
-    Args:
-        image_data: Raw image bytes
-        model_type: "printed" or "handwritten" (default: "printed")
-        preprocess: Whether to preprocess image (default: True)
-    
-    Returns:
-        Dictionary with OCR results:
-        {
-            "text": extracted_text,
-            "confidence": confidence_score (estimated),
-            "success": bool,
-            "model_type": str
-        }
-    """
-    if not TROCR_AVAILABLE:
-        return {
-            "text": "",
-            "confidence": 0.0,
-            "success": False,
-            "error": "TrOCR not available. Install: pip install transformers torch pillow",
-            "model_type": None
-        }
-    
-    if not initialize_trocr(model_type):
-        return {
-            "text": "",
-            "confidence": 0.0,
-            "success": False,
-            "error": "Failed to load TrOCR model",
-            "model_type": None
-        }
-    
-    try:
-        import torch
-        
-        # Load image
-        image = Image.open(io.BytesIO(image_data))
-        
-        # Preprocess if requested
-        if preprocess:
-            image = preprocess_image_for_trocr(image)
-        
-        # Process image with TrOCR
-        pixel_values = _trocr_processor(images=image, return_tensors="pt").pixel_values
-        
-        # Generate text
-        with torch.no_grad():
-            generated_ids = _trocr_model.generate(pixel_values)
-            generated_text = _trocr_processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
-        
-        # TrOCR doesn't provide confidence scores directly
-        # Estimate confidence based on text length and model type
-        # (longer extracted text generally indicates better recognition)
-        text_length = len(generated_text.strip())
-        estimated_confidence = min(95.0, 70.0 + (text_length / 10)) if text_length > 0 else 0.0
-        
-        return {
-            "text": generated_text.strip(),
-            "confidence": round(estimated_confidence, 2),
-            "success": True,
-            "char_count": text_length,
-            "model_type": model_type
-        }
-        
-    except Exception as e:
-        logger.error(f"TrOCR extraction failed: {str(e)}")
-        return {
-            "text": "",
-            "confidence": 0.0,
-            "success": False,
-            "error": str(e),
-            "model_type": model_type
-        }
-
-
-def detect_text_type(image_data: bytes) -> str:
-    """
-    Simple heuristic to detect if text is handwritten or printed.
-    This is a basic implementation - can be enhanced with a classifier.
-    
-    Args:
-        image_data: Raw image bytes
-    
-    Returns:
-        "handwritten" or "printed"
-    """
-    # For now, default to "printed" for most cases
-    # Can be enhanced with a proper classifier model
-    # Users can also manually specify via API
-    return "printed"
-
-
-def ocr_pdf_page(page, page_num: int, model_type: str = "auto") -> Dict[str, Any]:
-    """
-    Extract text from a PDF page using TrOCR.
-    
-    Args:
-        page: PyMuPDF page object
-        page_num: Page number (1-indexed)
-        model_type: "printed", "handwritten", or "auto" (default: "auto")
-    
-    Returns:
-        Dictionary with OCR results for the page
-    """
-    try:
-        # Render page to image at higher DPI for better OCR
-        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))  # 2x zoom for better quality
-        img_data = pix.tobytes("png")
-        
-        # Auto-detect text type if needed
-        if model_type == "auto":
-            model_type = detect_text_type(img_data)
-        
-        # Run TrOCR
-        ocr_result = extract_text_with_trocr(img_data, model_type=model_type)
-        
-        return {
-            "page_number": page_num,
-            "text": ocr_result.get("text", ""),
-            "confidence": ocr_result.get("confidence", 0),
-            "success": ocr_result.get("success", False),
-            "char_count": ocr_result.get("char_count", 0),
-            "model_type": ocr_result.get("model_type", model_type),
-            "error": ocr_result.get("error")
-        }
-        
-    except Exception as e:
-        logger.error(f"Error OCR'ing page {page_num} with TrOCR: {str(e)}")
-        return {
-            "page_number": page_num,
-            "text": "",
-            "confidence": 0,
-            "success": False,
-            "error": str(e),
-            "model_type": model_type
-        }
-
-
-def ocr_pdf_document(pdf_path: str, 
-                     model_type: str = "auto",
-                     max_pages: Optional[int] = None) -> Dict[str, Any]:
-    """
-    Extract text from entire PDF using TrOCR.
-    
-    Args:
-        pdf_path: Path to PDF file
-        model_type: "printed", "handwritten", or "auto" (default: "auto")
-        max_pages: Maximum pages to process (None = all pages)
-    
-    Returns:
-        Dictionary with OCR results:
-        {
-            "success": bool,
-            "pages": List[page_results],
-            "total_pages": int,
-            "processed_pages": int,
-            "avg_confidence": float,
-            "total_text_length": int,
-            "ocr_engine": "TrOCR"
-        }
-    """
-    if not PYMUPDF_AVAILABLE:
-        return {
-            "success": False,
-            "error": "PyMuPDF not available",
-            "ocr_engine": "TrOCR"
-        }
-    
-    if not is_trocr_available():
-        return {
-            "success": False,
-            "error": "TrOCR not available. Install: pip install transformers torch pillow",
-            "ocr_engine": "TrOCR"
-        }
-    
-    try:
-        doc = fitz.open(pdf_path)
-        total_pages = len(doc)
-        pages_to_process = min(total_pages, max_pages) if max_pages else total_pages
-        
-        logger.info(f"Starting TrOCR on {pdf_path}: {pages_to_process} pages (model_type: {model_type})")
-        
-        page_results = []
-        total_confidence = 0
-        total_text_length = 0
-        successful_pages = 0
-        
-        for page_num in range(pages_to_process):
-            logger.info(f"TrOCR processing page {page_num + 1}/{pages_to_process}...")
-            page = doc[page_num]
-            
-            result = ocr_pdf_page(page, page_num + 1, model_type)
-            page_results.append(result)
-            
-            if result["success"]:
-                successful_pages += 1
-                total_confidence += result["confidence"]
-                total_text_length += result["char_count"]
-        
-        doc.close()
-        
-        avg_confidence = total_confidence / successful_pages if successful_pages > 0 else 0
-        
-        return {
-            "success": True,
-            "pages": page_results,
-            "total_pages": total_pages,
-            "processed_pages": pages_to_process,
-            "successful_pages": successful_pages,
-            "avg_confidence": round(avg_confidence, 2),
-            "total_text_length": total_text_length,
-            "file_name": os.path.basename(pdf_path),
-            "ocr_engine": "TrOCR",
-            "model_type": model_type
-        }
-        
-    except Exception as e:
-        logger.error(f"Error during PDF OCR with TrOCR: {str(e)}")
-        return {
-            "success": False,
-            "error": str(e),
-            "ocr_engine": "TrOCR"
-        }
 
 
 def detect_scanned_pdf(pdf_path: str, text_threshold: float = 0.1) -> Tuple[bool, Dict[str, Any]]:
@@ -433,40 +119,42 @@ def detect_scanned_pdf(pdf_path: str, text_threshold: float = 0.1) -> Tuple[bool
         return False, {"error": str(e)}
 
 
-def get_ocr_status() -> Dict[str, Any]:
+def preprocess_image_for_ocr(image: Image.Image) -> Image.Image:
     """
-    Get OCR system status and capabilities.
+    Preprocess image to improve OCR accuracy.
+    
+    Args:
+        image: PIL Image object
     
     Returns:
-        Dictionary with OCR status information
+        Preprocessed PIL Image
     """
-    trocr_available = is_trocr_available()
-    model_loaded = _trocr_model is not None
+    if not CV2_AVAILABLE:
+        # Basic preprocessing without OpenCV
+        return image.convert('L')  # Convert to grayscale
     
-    status = {
-        "trocr_available": trocr_available,
-        "trocr_model_loaded": model_loaded,
-        "trocr_model_type": _trocr_model_type if model_loaded else None,
-        "pymupdf_available": PYMUPDF_AVAILABLE,
-        "ocr_engine": "TrOCR",
-        "supported_models": ["printed", "handwritten", "auto"],
-        "offline_capable": True,
-        "handwritten_support": True
-    }
-    
-    if model_loaded:
-        status["current_model"] = f"microsoft/trocr-base-{_trocr_model_type}"
-    
-    return status
-
-
-# Legacy compatibility functions (for backward compatibility)
-def is_tesseract_installed() -> bool:
-    """
-    Legacy function - always returns False as Tesseract is replaced by TrOCR.
-    Kept for backward compatibility.
-    """
-    return False
+    try:
+        # Convert PIL to OpenCV format
+        img_array = np.array(image)
+        
+        # Convert to grayscale
+        if len(img_array.shape) == 3:
+            gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+        else:
+            gray = img_array
+        
+        # Apply thresholding to get better contrast
+        gray = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+        
+        # Noise removal
+        gray = cv2.medianBlur(gray, 3)
+        
+        # Convert back to PIL
+        return Image.fromarray(gray)
+        
+    except Exception as e:
+        logger.warning(f"Image preprocessing failed: {str(e)}, using original")
+        return image.convert('L')
 
 
 def extract_text_with_ocr(image_data: bytes, 
@@ -474,8 +162,210 @@ def extract_text_with_ocr(image_data: bytes,
                           preprocess: bool = True,
                           config: str = '--psm 1') -> Dict[str, Any]:
     """
-    Legacy function - redirects to TrOCR.
-    Kept for backward compatibility.
+    Extract text from an image using Tesseract OCR.
+    
+    Args:
+        image_data: Raw image bytes
+        language: Tesseract language code (default: 'eng')
+        preprocess: Whether to preprocess image (default: True)
+        config: Tesseract configuration string
+    
+    Returns:
+        Dictionary with OCR results:
+        {
+            "text": extracted_text,
+            "confidence": confidence_score,
+            "success": bool
+        }
     """
-    logger.info("Using TrOCR instead of Tesseract (legacy function call)")
-    return extract_text_with_trocr(image_data, model_type="printed", preprocess=preprocess)
+    if not TESSERACT_AVAILABLE:
+        return {
+            "text": "",
+            "confidence": 0.0,
+            "success": False,
+            "error": "Tesseract not available"
+        }
+    
+    if not is_tesseract_installed():
+        return {
+            "text": "",
+            "confidence": 0.0,
+            "success": False,
+            "error": "Tesseract not installed on system"
+        }
+    
+    try:
+        # Load image
+        image = Image.open(io.BytesIO(image_data))
+        
+        # Preprocess if requested
+        if preprocess:
+            image = preprocess_image_for_ocr(image)
+        
+        # Run OCR
+        text = pytesseract.image_to_string(image, lang=language, config=config)
+        
+        # Get confidence data
+        try:
+            data = pytesseract.image_to_data(image, lang=language, output_type=pytesseract.Output.DICT)
+            confidences = [int(conf) for conf in data['conf'] if conf != '-1']
+            avg_confidence = sum(confidences) / len(confidences) if confidences else 0
+        except:
+            avg_confidence = 0
+        
+        return {
+            "text": text.strip(),
+            "confidence": round(avg_confidence, 2),
+            "success": True,
+            "char_count": len(text.strip())
+        }
+        
+    except Exception as e:
+        logger.error(f"OCR extraction failed: {str(e)}")
+        return {
+            "text": "",
+            "confidence": 0.0,
+            "success": False,
+            "error": str(e)
+        }
+
+
+def ocr_pdf_page(page, page_num: int, language: str = 'eng') -> Dict[str, Any]:
+    """
+    Extract text from a PDF page using OCR.
+    
+    Args:
+        page: PyMuPDF page object
+        page_num: Page number (1-indexed)
+        language: Tesseract language code
+    
+    Returns:
+        Dictionary with OCR results for the page
+    """
+    try:
+        # Render page to image at higher DPI for better OCR
+        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))  # 2x zoom for better quality
+        img_data = pix.tobytes("png")
+        
+        # Run OCR
+        ocr_result = extract_text_with_ocr(img_data, language=language)
+        
+        return {
+            "page_number": page_num,
+            "text": ocr_result.get("text", ""),
+            "confidence": ocr_result.get("confidence", 0),
+            "success": ocr_result.get("success", False),
+            "char_count": len(ocr_result.get("text", "")),
+            "error": ocr_result.get("error")
+        }
+        
+    except Exception as e:
+        logger.error(f"Error OCR'ing page {page_num}: {str(e)}")
+        return {
+            "page_number": page_num,
+            "text": "",
+            "confidence": 0,
+            "success": False,
+            "error": str(e)
+        }
+
+
+def ocr_pdf_document(pdf_path: str, 
+                     language: str = 'eng',
+                     max_pages: Optional[int] = None) -> Dict[str, Any]:
+    """
+    Extract text from entire PDF using OCR.
+    
+    Args:
+        pdf_path: Path to PDF file
+        language: Tesseract language code (default: 'eng')
+        max_pages: Maximum pages to process (None = all pages)
+    
+    Returns:
+        Dictionary with OCR results:
+        {
+            "success": bool,
+            "pages": List[page_results],
+            "total_pages": int,
+            "processed_pages": int,
+            "avg_confidence": float,
+            "total_text_length": int
+        }
+    """
+    if not PYMUPDF_AVAILABLE:
+        return {
+            "success": False,
+            "error": "PyMuPDF not available"
+        }
+    
+    if not is_tesseract_installed():
+        return {
+            "success": False,
+            "error": "Tesseract not installed on system. Install with: apt-get install tesseract-ocr (Linux) or brew install tesseract (Mac)"
+        }
+    
+    try:
+        doc = fitz.open(pdf_path)
+        total_pages = len(doc)
+        pages_to_process = min(total_pages, max_pages) if max_pages else total_pages
+        
+        logger.info(f"Starting OCR on {pdf_path}: {pages_to_process} pages")
+        
+        page_results = []
+        total_confidence = 0
+        total_text_length = 0
+        successful_pages = 0
+        
+        for page_num in range(pages_to_process):
+            logger.info(f"OCR processing page {page_num + 1}/{pages_to_process}...")
+            page = doc[page_num]
+            
+            result = ocr_pdf_page(page, page_num + 1, language)
+            page_results.append(result)
+            
+            if result["success"]:
+                successful_pages += 1
+                total_confidence += result["confidence"]
+                total_text_length += result["char_count"]
+        
+        doc.close()
+        
+        avg_confidence = total_confidence / successful_pages if successful_pages > 0 else 0
+        
+        return {
+            "success": True,
+            "pages": page_results,
+            "total_pages": total_pages,
+            "processed_pages": pages_to_process,
+            "successful_pages": successful_pages,
+            "avg_confidence": round(avg_confidence, 2),
+            "total_text_length": total_text_length,
+            "file_name": os.path.basename(pdf_path),
+            "ocr_engine": "Tesseract"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error during PDF OCR: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+def get_ocr_status() -> Dict[str, Any]:
+    """
+    Get OCR system status and capabilities.
+    
+    Returns:
+        Dictionary with OCR status information
+    """
+    return {
+        "tesseract_available": TESSERACT_AVAILABLE,
+        "tesseract_installed": is_tesseract_installed(),
+        "pymupdf_available": PYMUPDF_AVAILABLE,
+        "opencv_available": CV2_AVAILABLE,
+        "preprocessing_available": CV2_AVAILABLE,
+        "tesseract_version": pytesseract.get_tesseract_version() if is_tesseract_installed() else None,
+        "supported_languages": ["eng", "hin", "fra", "deu", "spa"] if is_tesseract_installed() else [],
+        "ocr_engine": "Tesseract"
+    }

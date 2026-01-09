@@ -68,29 +68,29 @@ def parse_pdf(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200, 
     documents = []
     file_name = os.path.basename(file_path)
     
-    # If OCR mode is enabled, use TrOCR service
+    # If OCR mode is enabled, use Tesseract OCR service
     if use_ocr:
-        from services.ocr_service import ocr_pdf_document, is_trocr_available, extract_text_with_trocr
+        from services.ocr_service import ocr_pdf_document, is_tesseract_installed, extract_text_with_ocr
         
-        if not is_trocr_available():
-            raise ImportError("TrOCR not available. Install: pip install transformers torch pillow")
+        if not is_tesseract_installed():
+            raise ImportError("Tesseract OCR not installed. Install: apt-get install tesseract-ocr (Linux) or brew install tesseract (Mac)")
         
-        logger.info(f"🔍 Using TrOCR mode for: {file_name}")
+        logger.info(f"🔍 Using Tesseract OCR mode for: {file_name}")
         
         # Open PDF to extract both page text (via OCR) and images
         doc = fitz.open(file_path)
         total_pages = len(doc)
         
-        # Use "auto" to automatically detect printed vs handwritten
-        ocr_result = ocr_pdf_document(file_path, model_type="auto")
+        # Process PDF with Tesseract OCR
+        ocr_result = ocr_pdf_document(file_path)
         
         if not ocr_result.get("success"):
             error_msg = ocr_result.get("error", "Unknown OCR error")
-            logger.error(f"TrOCR failed: {error_msg}")
+            logger.error(f"Tesseract OCR failed: {error_msg}")
             doc.close()
-            raise RuntimeError(f"TrOCR processing failed: {error_msg}")
+            raise RuntimeError(f"Tesseract OCR processing failed: {error_msg}")
         
-        logger.info(f"✓ TrOCR completed: {ocr_result['processed_pages']} pages, avg confidence: {ocr_result['avg_confidence']}%, engine: {ocr_result.get('ocr_engine', 'TrOCR')}")
+        logger.info(f"✓ Tesseract OCR completed: {ocr_result['processed_pages']} pages, avg confidence: {ocr_result['avg_confidence']}%, engine: {ocr_result.get('ocr_engine', 'Tesseract')}")
         
         # Process OCR results into documents (text from pages)
         total_ocr_text = 0
@@ -104,7 +104,6 @@ def parse_pdf(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200, 
             
             if success and text:
                 total_ocr_text += len(text)
-                model_type = page_result.get("model_type", "printed")
                 confidence = page_result.get("confidence", 0)
                 
                 # Chunk the OCR text
@@ -123,20 +122,19 @@ def parse_pdf(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200, 
                                 "total_chunks_in_page": len(chunks),
                                 "file_type": "pdf",
                                 "ocr_applied": True,
-                                "ocr_engine": "TrOCR",
-                                "ocr_model_type": model_type,
+                                "ocr_engine": "Tesseract",
                                 "ocr_confidence": confidence,
                                 "ingestion_timestamp": datetime.now().isoformat(),
                                 "total_pages": total_pages,
-                                "citation": f"{file_name}, Page {page_num} (TrOCR-{model_type})"
+                                "citation": f"{file_name}, Page {page_num} (OCR)"
                             }
                         ))
             else:
                 error_msg = page_result.get("error", "Unknown error")
                 logger.warning(f"Page {page_num}: OCR failed or no text extracted - {error_msg}")
         
-        # Extract and process images from each page with TrOCR
-        logger.info(f"Extracting images from {total_pages} pages and applying TrOCR...")
+        # Extract and process images from each page with Tesseract OCR
+        logger.info(f"Extracting images from {total_pages} pages and applying Tesseract OCR...")
         image_count = 0
         
         for page_num in range(total_pages):
@@ -145,25 +143,23 @@ def parse_pdf(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200, 
             # Extract images from this page
             page_images = _extract_images_from_pdf_page(page, page_num + 1, file_name)
             
-            # Process each image with TrOCR
+            # Process each image with Tesseract OCR
             for image_bytes, image_meta in page_images:
                 try:
                     image_count += 1
-                    logger.info(f"Processing image {image_count} from page {page_num + 1} with TrOCR...")
+                    logger.info(f"Processing image {image_count} from page {page_num + 1} with Tesseract OCR...")
                     
-                    # Apply TrOCR to the image
-                    # Use "printed" model by default (can be enhanced with auto-detection)
-                    ocr_image_result = extract_text_with_trocr(image_bytes, model_type="printed", preprocess=True)
+                    # Apply Tesseract OCR to the image
+                    ocr_image_result = extract_text_with_ocr(image_bytes, preprocess=True)
                     
                     if ocr_image_result.get("success") and ocr_image_result.get("text"):
                         image_text = ocr_image_result.get("text", "").strip()
                         image_confidence = ocr_image_result.get("confidence", 0)
-                        image_model_type = ocr_image_result.get("model_type", "printed")
                         
                         if image_text:
                             # Create document for OCR'd image text
                             documents.append(Document(
-                                page_content=f"Image content (TrOCR): {image_text}",
+                                page_content=f"Image content (OCR): {image_text}",
                                 metadata={
                                     "type": "image_ocr",
                                     "source": file_name,
@@ -173,13 +169,12 @@ def parse_pdf(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200, 
                                     "image_format": image_meta.get("format", "unknown"),
                                     "file_type": "pdf",
                                     "ocr_applied": True,
-                                    "ocr_engine": "TrOCR",
-                                    "ocr_model_type": image_model_type,
+                                    "ocr_engine": "Tesseract",
                                     "ocr_confidence": image_confidence,
                                     "authoritative": True,  # OCR text from images is authoritative
                                     "ingestion_timestamp": datetime.now().isoformat(),
                                     "total_pages": total_pages,
-                                    "citation": f"{file_name}, Page {page_num + 1}, Image {image_meta.get('image_index', 0) + 1} (TrOCR-{image_model_type})"
+                                    "citation": f"{file_name}, Page {page_num + 1}, Image {image_meta.get('image_index', 0) + 1} (OCR)"
                                 }
                             ))
                             logger.info(f"✓ Extracted text from image {image_count}: {len(image_text)} chars")
@@ -188,9 +183,9 @@ def parse_pdf(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200, 
                     else:
                         # If OCR fails, still create a document noting the image exists
                         error_msg = ocr_image_result.get("error", "Unknown error")
-                        logger.warning(f"TrOCR failed for image {image_count} on page {page_num + 1}: {error_msg}")
+                        logger.warning(f"Tesseract OCR failed for image {image_count} on page {page_num + 1}: {error_msg}")
                         documents.append(Document(
-                            page_content=f"Image detected on page {page_num + 1} but TrOCR extraction failed: {error_msg}",
+                            page_content=f"Image detected on page {page_num + 1} but OCR extraction failed: {error_msg}",
                             metadata={
                                 "type": "image_ocr_failed",
                                 "source": file_name,
@@ -199,12 +194,12 @@ def parse_pdf(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200, 
                                 "image_index": image_meta.get("image_index", 0),
                                 "file_type": "pdf",
                                 "ocr_applied": True,
-                                "ocr_engine": "TrOCR",
+                                "ocr_engine": "Tesseract",
                                 "ocr_error": error_msg,
                                 "authoritative": False,
                                 "ingestion_timestamp": datetime.now().isoformat(),
                                 "total_pages": total_pages,
-                                "citation": f"{file_name}, Page {page_num + 1}, Image {image_meta.get('image_index', 0) + 1} (TrOCR-failed)"
+                                "citation": f"{file_name}, Page {page_num + 1}, Image {image_meta.get('image_index', 0) + 1} (OCR-failed)"
                             }
                         ))
                     
@@ -240,7 +235,7 @@ def parse_pdf(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200, 
         image_ocr_chunks = len([d for d in documents if d.metadata.get("type") == "image_ocr"])
         image_desc_chunks = len([d for d in documents if d.metadata.get("type") == "image_description"])
         
-        logger.info(f"✓ Created {len(documents)} TrOCR document chunks from {file_name}:")
+        logger.info(f"✓ Created {len(documents)} OCR document chunks from {file_name}:")
         logger.info(f"  - {text_chunks} text chunks (page OCR, {total_ocr_text} total chars)")
         logger.info(f"  - {image_ocr_chunks} image OCR chunks")
         logger.info(f"  - {image_desc_chunks} image description chunks")
@@ -248,7 +243,7 @@ def parse_pdf(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200, 
         
         if total_ocr_text < 50:
             logger.warning(f"⚠️  Very little text extracted via OCR ({total_ocr_text} chars)")
-            logger.warning(f"   This might indicate: 1) Poor image quality, 2) Wrong model type, 3) PDF is mostly images")
+            logger.warning(f"   This might indicate: 1) Poor image quality, 2) PDF is mostly images, 3) Incorrect language setting")
         
         if not documents:
             logger.error(f"✗ No documents created from PDF with OCR: {file_name}")
@@ -320,42 +315,40 @@ def parse_pdf(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200, 
                 elif text_length <= 10:
                     # Very little text extracted - likely scanned PDF
                     logger.warning(f"Page {page_num + 1}: Only {text_length} characters extracted - PDF may be scanned. Consider using OCR mode.")
-                else:
-                    logger.debug(f"Page {page_num + 1}: No text extracted")
-                    
-                    # Rule 2 & 3: Extract images from this page and pass to vision model
-                    page_images = _extract_images_from_pdf_page(page, page_num + 1, file_name)
-                    
-                    # Rule 4 & 5: Store each image description as separate Document with metadata
-                    for image_bytes, image_meta in page_images:
-                        try:
-                            # Generate image description using vision model (stub for now)
-                            image_description = _generate_image_description(
-                                image_bytes, 
-                                image_meta.get("format", "PNG")
-                            )
-                            
-                            # Create separate Document for image description (non-authoritative)
-                            documents.append(Document(
-                                page_content=image_description,
-                                metadata={
-                                    "type": "image_description",
-                                    "authoritative": False,
-                                    "confidence": "low",
-                                    "page_number": page_num + 1,
-                                    "source": file_name,
-                                    "file_path": file_path,
-                                    "image_index": image_meta.get("image_index", 0),
-                                    "image_format": image_meta.get("format", "unknown"),
-                                    "file_type": "pdf",
-                                    "ingestion_timestamp": datetime.now().isoformat(),
-                                    "total_pages": total_pages,
-                                    "citation": f"{file_name}, Page {page_num + 1}, Image {image_meta.get('image_index', 0) + 1} (non-authoritative)"
-                                }
-                            ))
-                        except Exception as e:
-                            logger.warning(f"Failed to generate description for image on page {page_num + 1}: {str(e)}")
-                            continue
+                
+                # Rule 2 & 3: Extract images from this page and pass to vision model
+                page_images = _extract_images_from_pdf_page(page, page_num + 1, file_name)
+                
+                # Rule 4 & 5: Store each image description as separate Document with metadata
+                for image_bytes, image_meta in page_images:
+                    try:
+                        # Generate image description using vision model (stub for now)
+                        image_description = _generate_image_description(
+                            image_bytes, 
+                            image_meta.get("format", "PNG")
+                        )
+                        
+                        # Create separate Document for image description (non-authoritative)
+                        documents.append(Document(
+                            page_content=image_description,
+                            metadata={
+                                "type": "image_description",
+                                "authoritative": False,
+                                "confidence": "low",
+                                "page_number": page_num + 1,
+                                "source": file_name,
+                                "file_path": file_path,
+                                "image_index": image_meta.get("image_index", 0),
+                                "image_format": image_meta.get("format", "unknown"),
+                                "file_type": "pdf",
+                                "ingestion_timestamp": datetime.now().isoformat(),
+                                "total_pages": total_pages,
+                                "citation": f"{file_name}, Page {page_num + 1}, Image {image_meta.get('image_index', 0) + 1} (non-authoritative)"
+                            }
+                        ))
+                    except Exception as e:
+                        logger.warning(f"Failed to generate description for image on page {page_num + 1}: {str(e)}")
+                        continue
                             
             doc.close()
             
@@ -366,13 +359,13 @@ def parse_pdf(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200, 
                 logger.warning(f"   Attempting automatic OCR fallback...")
                 
                 try:
-                    from services.ocr_service import ocr_pdf_document, is_trocr_available
-                    if is_trocr_available():
-                        logger.info(f"🔄 Auto-enabling TrOCR for scanned PDF: {file_name}")
+                    from services.ocr_service import ocr_pdf_document, is_tesseract_installed
+                    if is_tesseract_installed():
+                        logger.info(f"🔄 Auto-enabling Tesseract OCR for scanned PDF: {file_name}")
                         # Recursively call with OCR enabled
                         return parse_pdf(file_path, chunk_size, chunk_overlap, use_ocr=True)
                     else:
-                        logger.warning(f"   TrOCR not available for auto-fallback")
+                        logger.warning(f"   Tesseract OCR not available for auto-fallback")
                 except Exception as e:
                     logger.warning(f"   OCR fallback failed: {str(e)}")
                     logger.warning(f"   This PDF may be scanned. Try uploading with is_scanned=True to enable OCR")

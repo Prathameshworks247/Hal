@@ -754,42 +754,33 @@ async def store_file(request: ExcelFileInput = Depends()):
         if file_ext == '.pdf':
             if request.is_scanned:
                 # User explicitly marked as scanned
-                from services.ocr_service import get_ocr_status, is_trocr_available
+                from services.ocr_service import get_ocr_status, is_tesseract_installed
                 ocr_check = get_ocr_status()
                 logger.info(f"📄 PDF file with is_scanned=True: {file_name}")
-                logger.info(f"TrOCR status: available={ocr_check.get('trocr_available', False)}, loaded={ocr_check.get('trocr_model_loaded', False)}")
+                logger.info(f"Tesseract status: available={ocr_check.get('tesseract_available', False)}, installed={ocr_check.get('tesseract_installed', False)}")
                 
-                if ocr_check.get("trocr_available", False):
-                    # Try to initialize TrOCR if not already loaded
-                    if not ocr_check.get("trocr_model_loaded", False):
-                        logger.info("TrOCR model not loaded, initializing...")
-                        if is_trocr_available():
-                            logger.info("✓ TrOCR model initialized successfully")
-                        else:
-                            logger.error("✗ Failed to initialize TrOCR model")
-                    
-                    logger.info(f"📄 Scanned PDF detected: {file_name} - TrOCR will be applied during parsing")
-                    ocr_status = f"TrOCR will be applied during indexing (model: {ocr_check.get('current_model', 'auto')})"
+                if ocr_check.get("tesseract_installed", False):
+                    logger.info(f"📄 Scanned PDF detected: {file_name} - Tesseract OCR will be applied during parsing")
+                    ocr_status = f"Tesseract OCR will be applied during indexing"
                     use_ocr = True
                 else:
-                    logger.warning("TrOCR not available. Cannot process scanned PDF.")
-                    ocr_status = "WARNING: TrOCR not available - install: pip install transformers torch pillow"
+                    logger.warning("Tesseract OCR not installed. Cannot process scanned PDF.")
+                    ocr_status = "WARNING: Tesseract OCR not installed - install: apt-get install tesseract-ocr (Linux) or brew install tesseract (Mac)"
             else:
                 # Auto-detect if PDF is scanned (even if is_scanned=False)
-                from services.ocr_service import detect_scanned_pdf
+                from services.ocr_service import detect_scanned_pdf, get_ocr_status, is_tesseract_installed
                 try:
                     is_scanned, detection_info = detect_scanned_pdf(file_location)
                     if is_scanned:
                         logger.info(f"📄 Auto-detected scanned PDF: {file_name} (confidence: {detection_info.get('confidence', 'unknown')})")
-                        from services.ocr_service import get_ocr_status, is_trocr_available
                         ocr_check = get_ocr_status()
-                        if ocr_check.get("trocr_available", False):
-                            logger.info("Auto-enabling TrOCR for scanned PDF")
-                            ocr_status = f"Auto-detected scanned PDF - TrOCR will be applied (model: {ocr_check.get('current_model', 'auto')})"
+                        if ocr_check.get("tesseract_installed", False):
+                            logger.info("Auto-enabling Tesseract OCR for scanned PDF")
+                            ocr_status = f"Auto-detected scanned PDF - Tesseract OCR will be applied"
                             use_ocr = True
                         else:
-                            logger.warning("Scanned PDF detected but TrOCR not available")
-                            ocr_status = "WARNING: Scanned PDF detected but TrOCR not available"
+                            logger.warning("Scanned PDF detected but Tesseract OCR not available")
+                            ocr_status = "WARNING: Scanned PDF detected but Tesseract OCR not available"
                 except Exception as e:
                     logger.warning(f"Could not auto-detect PDF type: {str(e)}")
 
@@ -1005,23 +996,20 @@ async def analyse(request: QueryRequestFile) -> Dict[Any, Any]:
 
 @app.get("/system/ocr-status")
 async def get_ocr_status_endpoint():
-    """Get OCR system status and check if TrOCR is available."""
+    """Get OCR system status and check if Tesseract is installed."""
     from services.ocr_service import get_ocr_status
     
     status = get_ocr_status()
     return {
-        "ocr_available": status["trocr_available"],
-        "ocr_engine": "TrOCR",
-        "model_loaded": status["trocr_model_loaded"],
-        "current_model": status.get("current_model", None),
-        "model_type": status.get("trocr_model_type", None),
-        "supported_models": status["supported_models"],
-        "handwritten_support": status["handwritten_support"],
-        "offline_capable": status["offline_capable"],
+        "ocr_available": status["tesseract_installed"],
+        "ocr_engine": "Tesseract",
+        "tesseract_version": status.get("tesseract_version", None),
+        "supported_languages": status.get("supported_languages", []),
         "details": status,
         "instructions": {
-            "pip": "pip install transformers torch pillow",
-            "note": "TrOCR models download automatically from HuggingFace on first use"
+            "linux": "sudo apt-get install tesseract-ocr",
+            "mac": "brew install tesseract",
+            "windows": "Download from: https://github.com/UB-Mannheim/tesseract/wiki"
         }
     }
 
