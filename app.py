@@ -23,7 +23,7 @@ import re
 from fastapi.responses import StreamingResponse,JSONResponse
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from fastapi.staticfiles import StaticFiles
 from collections import defaultdict
 from services.llm import get_llm
@@ -1125,7 +1125,8 @@ async def get_index_statistics():
 @app.post("/index/add_document")
 async def add_document_to_index(
     file: UploadFile = File(...),
-    pb_number: str = Form(...)
+    pb_number: str = Form(...),
+    department: Optional[str] = Form(None)
 ):
     """Add a new document to the vector store incrementally."""
     try:
@@ -1139,25 +1140,27 @@ async def add_document_to_index(
         with open(file_location, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         
-        # Parse document
-        documents = parse_document(file_location)
+        # Use ingestion service with department routing
+        result = ingest_single_file(
+            file_path=file_location,
+            department=department,
+            incremental=True
+        )
         
-        # Add to vector store incrementally
-        manager = IncrementalLearningManager("snag_faiss_index")
-        success = manager.add_documents(documents, source_file=file_location)
-        
-        if success:
+        if result.get("success"):
             return {
                 "message": "Document added successfully",
                 "file_name": file_name,
-                "num_chunks": len(documents),
+                "num_chunks": result.get("num_chunks", 0),
                 "file_type": os.path.splitext(file_name)[1],
-                "statistics": manager.get_statistics()
+                "department": department,
+                "index_path": result.get("index_path"),
+                "statistics": get_index_info(result.get("index_path", "snag_faiss_index"))
             }
         else:
             return JSONResponse(
                 status_code=500,
-                content={"error": "Failed to add document to index"}
+                content={"error": result.get("error", "Failed to add document to index")}
             )
             
     except Exception as e:
@@ -1229,11 +1232,13 @@ def _get_query_recommendations(verification_details: Dict[str, Any]) -> List[str
 async def admin_ingest_file(
     file: UploadFile = File(...),
     incremental: bool = Form(True),
-    index_path: str = Form("snag_faiss_index")
+    index_path: str = Form("snag_faiss_index"),
+    department: Optional[str] = Form(None)
 ):
     """
     Admin endpoint: Ingest a single file into the global FAISS index.
     Supports PDF, DOCX, TXT, XLS, XLSX.
+    If department is provided, stores in department-specific path: snag_faiss_index/{department}/faiss_index
     """
     try:
         # Save uploaded file temporarily
@@ -1246,13 +1251,14 @@ async def admin_ingest_file(
         with open(temp_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         
-        logger.info(f"Admin ingesting file: {file_name}")
+        logger.info(f"Admin ingesting file: {file_name} (department: {department or 'none'})")
         
-        # Ingest file
+        # Ingest file with department routing
         result = ingest_single_file(
             file_path=temp_path,
             index_path=index_path,
-            incremental=incremental
+            incremental=incremental,
+            department=department
         )
         
         # Clean up temp file
@@ -1291,19 +1297,22 @@ async def admin_ingest_file(
 async def admin_ingest_directory(
     directory_path: str = Form(...),
     recursive: bool = Form(True),
-    index_path: str = Form("snag_faiss_index")
+    index_path: str = Form("snag_faiss_index"),
+    department: Optional[str] = Form(None)
 ):
     """
     Admin endpoint: Ingest all supported files from a directory.
     Useful for batch ingestion of multiple documents.
+    If department is provided, stores in department-specific path.
     """
     try:
-        logger.info(f"Admin ingesting directory: {directory_path}")
+        logger.info(f"Admin ingesting directory: {directory_path} (department: {department or 'none'})")
         
         result = ingest_directory(
             directory_path=directory_path,
             index_path=index_path,
-            recursive=recursive
+            recursive=recursive,
+            department=department
         )
         
         if result["success"]:
@@ -1335,18 +1344,21 @@ async def admin_ingest_directory(
 @app.post("/admin/index/rebuild")
 async def admin_rebuild_index(
     source_paths: List[str] = Form(...),
-    index_path: str = Form("snag_faiss_index")
+    index_path: str = Form("snag_faiss_index"),
+    department: Optional[str] = Form(None)
 ):
     """
     Admin endpoint: Rebuild the entire FAISS index from scratch.
     WARNING: This will delete the existing index and rebuild it.
+    If department is provided, rebuilds department-specific index.
     """
     try:
-        logger.info(f"Admin rebuilding index from {len(source_paths)} sources")
+        logger.info(f"Admin rebuilding index from {len(source_paths)} sources (department: {department or 'none'})")
         
         result = rebuild_index_from_scratch(
             source_paths=source_paths,
-            index_path=index_path
+            index_path=index_path,
+            department=department
         )
         
         if result["success"]:

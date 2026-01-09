@@ -271,6 +271,12 @@ def create_or_update_index(
                 model_kwargs={'device': 'cpu'}
             )
         
+        # Ensure directory exists (FAISS.save_local requires the exact directory to exist)
+        # os.makedirs creates all parent directories recursively
+        # FAISS.save_local() will create index.faiss and index.pkl in the specified directory
+        os.makedirs(index_path, exist_ok=True)
+        logger.debug(f"Ensured directory exists: {index_path}")
+        
         # Check if index exists
         index_exists = os.path.exists(index_path) and os.path.exists(os.path.join(index_path, "index.faiss"))
         
@@ -290,7 +296,7 @@ def create_or_update_index(
             manager.metadata["total_documents"] = len(documents)
             manager._save_metadata()
             
-            logger.info(f"✓ Created new index with {len(documents)} documents")
+            logger.info(f"✓ Created new index with {len(documents)} documents at: {index_path}")
             return True
             
     except Exception as e:

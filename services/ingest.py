@@ -26,15 +26,19 @@ def ingest_single_file(
     file_path: str,
     index_path: str = "snag_faiss_index",
     incremental: bool = True,
-    use_ocr: bool = False
+    use_ocr: bool = False,
+    department: Optional[str] = None
 ) -> dict:
     """
     Ingest a single file into the FAISS index.
     
     Args:
         file_path: Path to the file to ingest
-        index_path: Path to FAISS index directory
+        index_path: Base path to FAISS index directory (default: "snag_faiss_index")
         incremental: If True, add to existing index; if False, create new
+        use_ocr: If True, use OCR for scanned PDFs
+        department: Department name (structures, avionics, propulsion, maintenance, general). 
+                   If provided, uses department-specific path: snag_faiss_index/{department}/faiss_index
     
     Returns:
         Dictionary with ingestion results
@@ -69,13 +73,32 @@ def ingest_single_file(
         stats = manager_temp.get_embedding_stats(documents)
         logger.info(f"✓ Parsed {stats['total_documents']} chunks: {stats['text_chunks']} text, {stats['image_descriptions']} images")
         
+        # Determine department-specific index path
+        if department:
+            from services.department_routing import get_department_index_path, VALID_DEPARTMENTS
+            dept_normalized = department.lower().strip()
+            if dept_normalized not in VALID_DEPARTMENTS or dept_normalized == "default":
+                logger.warning(f"Invalid or 'default' department: {department}, using base index path")
+                actual_index_path = index_path
+            else:
+                actual_index_path = get_department_index_path(dept_normalized)
+                logger.info(f"📂 Routing to department-specific index: {actual_index_path} (department: {dept_normalized})")
+        else:
+            actual_index_path = index_path
+            logger.info(f"📂 Using base index path: {actual_index_path} (no department specified)")
+        
+        # Ensure directory exists (FAISS.save_local requires the exact directory to exist)
+        # os.makedirs creates all parent directories recursively
+        os.makedirs(actual_index_path, exist_ok=True)
+        logger.debug(f"Ensured directory exists: {actual_index_path}")
+        
         # Get multimodal embeddings model
         embeddings = get_multimodal_embeddings(model_path="./all-MiniLM-L6-v2", device='cpu')
         
         # Create or update index
         success = create_or_update_index(
             documents=documents,
-            index_path=index_path,
+            index_path=actual_index_path,
             embeddings=embeddings,
             incremental=incremental
         )
@@ -87,7 +110,9 @@ def ingest_single_file(
                 "file_name": file_name,
                 "file_type": file_ext,
                 "num_chunks": len(documents),
-                "index_path": index_path,
+                "index_path": actual_index_path,
+                "base_index_path": index_path,
+                "department": department,
                 "incremental": incremental
             }
         else:
@@ -108,16 +133,18 @@ def ingest_directory(
     directory_path: str,
     index_path: str = "snag_faiss_index",
     recursive: bool = True,
-    file_extensions: Optional[List[str]] = None
+    file_extensions: Optional[List[str]] = None,
+    department: Optional[str] = None
 ) -> dict:
     """
     Ingest all supported files from a directory into FAISS index.
     
     Args:
         directory_path: Path to directory containing files
-        index_path: Path to FAISS index directory
+        index_path: Base path to FAISS index directory
         recursive: If True, search subdirectories
         file_extensions: List of extensions to process (None = all supported)
+        department: Department name. If provided, uses department-specific path
     
     Returns:
         Dictionary with ingestion results
@@ -172,7 +199,8 @@ def ingest_directory(
             result = ingest_single_file(
                 file_path=file_path,
                 index_path=index_path,
-                incremental=True  # Always incremental for batch processing
+                incremental=True,  # Always incremental for batch processing
+                department=department
             )
             
             if result["success"]:
@@ -196,14 +224,16 @@ def ingest_directory(
 
 def rebuild_index_from_scratch(
     source_paths: List[str],
-    index_path: str = "snag_faiss_index"
+    index_path: str = "snag_faiss_index",
+    department: Optional[str] = None
 ) -> dict:
     """
     Rebuild the entire FAISS index from scratch.
     
     Args:
         source_paths: List of file or directory paths to ingest
-        index_path: Path to FAISS index directory
+        index_path: Base path to FAISS index directory
+        department: Department name. If provided, uses department-specific path
     
     Returns:
         Dictionary with rebuild results
@@ -259,6 +289,25 @@ def rebuild_index_from_scratch(
         stats = manager_temp.get_embedding_stats(all_documents)
         logger.info(f"📊 Total documents: {stats['total_documents']} ({stats['text_chunks']} text, {stats['image_descriptions']} images)")
         
+        # Determine department-specific index path
+        if department:
+            from services.department_routing import get_department_index_path, VALID_DEPARTMENTS
+            dept_normalized = department.lower().strip()
+            if dept_normalized not in VALID_DEPARTMENTS or dept_normalized == "default":
+                logger.warning(f"Invalid or 'default' department: {department}, using base index path")
+                actual_index_path = index_path
+            else:
+                actual_index_path = get_department_index_path(dept_normalized)
+                logger.info(f"📂 Rebuilding department-specific index: {actual_index_path} (department: {dept_normalized})")
+        else:
+            actual_index_path = index_path
+            logger.info(f"📂 Rebuilding base index: {actual_index_path}")
+        
+        # Ensure directory exists (FAISS.save_local requires the exact directory to exist)
+        # os.makedirs creates all parent directories recursively
+        os.makedirs(actual_index_path, exist_ok=True)
+        logger.debug(f"Ensured directory exists: {actual_index_path}")
+        
         # Create multimodal embeddings
         embeddings = get_multimodal_embeddings(model_path="./all-MiniLM-L6-v2", device='cpu')
         
@@ -267,11 +316,11 @@ def rebuild_index_from_scratch(
         vectorstore = FAISS.from_documents(all_documents, embedding=embeddings)
         
         # Save index
-        vectorstore.save_local(index_path)
-        logger.info(f"✓ Index saved to: {index_path}")
+        vectorstore.save_local(actual_index_path)
+        logger.info(f"✓ Index saved to: {actual_index_path}")
         
         # Initialize metadata
-        manager = IncrementalLearningManager(index_path, embeddings)
+        manager = IncrementalLearningManager(actual_index_path, embeddings)
         manager.metadata["total_documents"] = len(all_documents)
         manager._save_metadata()
         
@@ -280,7 +329,9 @@ def rebuild_index_from_scratch(
             "total_documents": len(all_documents),
             "processed_files": len(processed_files),
             "failed_files": len(failed_files),
-            "index_path": index_path,
+            "index_path": actual_index_path,
+            "base_index_path": index_path,
+            "department": department,
             "files": {
                 "processed": processed_files,
                 "failed": failed_files

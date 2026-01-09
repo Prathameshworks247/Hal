@@ -70,7 +70,7 @@ def get_department_index_path(department: str) -> str:
         department: Department name
     
     Returns:
-        Path to department FAISS index
+        Path to department FAISS index directory
     """
     if department == "default":
         return BASE_INDEX_PATH
