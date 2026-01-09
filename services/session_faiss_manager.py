@@ -98,36 +98,70 @@ class SessionFAISSManager:
         try:
             logger.info(f"Creating embeddings for {len(documents)} document chunks (session: {self.session_id})")
             
+            if not documents:
+                logger.error("No documents provided for embedding")
+                return False
+            
+            # Validate documents have content
+            valid_documents = []
+            for idx, doc in enumerate(documents):
+                if not doc.page_content or not doc.page_content.strip():
+                    logger.warning(f"Document {idx} has empty content, skipping")
+                    continue
+                valid_documents.append(doc)
+            
+            if not valid_documents:
+                logger.error("No valid documents with content found")
+                return False
+            
+            logger.info(f"Valid documents: {len(valid_documents)}/{len(documents)}")
+            
             # Mark documents as uploaded file content
-            for doc in documents:
+            for doc in valid_documents:
                 doc.metadata["type"] = "uploaded_file"
                 doc.metadata["authoritative"] = True
                 doc.metadata["session_id"] = self.session_id
             
             # Create FAISS index from documents
-            faiss_index = FAISS.from_documents(documents, self.embeddings)
+            logger.info(f"Generating embeddings and creating FAISS index...")
+            try:
+                faiss_index = FAISS.from_documents(valid_documents, self.embeddings)
+                logger.info(f"✓ FAISS index created with {len(valid_documents)} documents")
+            except Exception as e:
+                logger.exception(f"Error creating FAISS index: {str(e)}")
+                raise
+            
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(self.faiss_path), exist_ok=True)
             
             # Save to disk
-            faiss_index.save_local(self.faiss_path)
-            logger.info(f"Saved session FAISS to: {self.faiss_path}")
+            try:
+                faiss_index.save_local(self.faiss_path)
+                logger.info(f"✓ Saved session FAISS to: {self.faiss_path}")
+            except Exception as e:
+                logger.exception(f"Error saving FAISS index to disk: {str(e)}")
+                raise
             
             # Update cache
             if self.config.cache_in_memory:
                 _session_faiss_cache[self.session_id] = faiss_index
+                logger.debug(f"Updated in-memory cache for session {self.session_id}")
             
             self._faiss_index = faiss_index
             
             # Update metadata
             self.metadata.has_uploaded_file = True
-            self.metadata.document_chunks = len(documents)
-            self.metadata.total_embeddings = len(documents)
+            self.metadata.document_chunks = len(valid_documents)
+            self.metadata.total_embeddings = len(valid_documents)
             save_session_metadata(self.session_id, self.metadata)
             
-            logger.info(f"✓ Uploaded file embedded: {len(documents)} chunks in session {self.session_id}")
+            logger.info(f"✓ Uploaded file embedded: {len(valid_documents)} chunks in session {self.session_id}")
             return True
             
         except Exception as e:
-            logger.error(f"Error adding uploaded file embeddings: {str(e)}")
+            logger.exception(f"Error adding uploaded file embeddings: {str(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return False
     
     def load_session_faiss(self) -> Optional[FAISS]:

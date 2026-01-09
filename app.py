@@ -735,16 +735,49 @@ async def store_file(request: ExcelFileInput = Depends()):
         # Handle OCR if PDF and is_scanned flag is set
         ocr_status = None
         use_ocr = False
-        if file_ext == '.pdf' and request.is_scanned:
-            from services.ocr_service import get_ocr_status
-            ocr_check = get_ocr_status()
-            if ocr_check["trocr_available"]:
-                logger.info(f"📄 Scanned PDF detected: {file_name} - TrOCR will be applied during parsing")
-                ocr_status = f"TrOCR will be applied during indexing (model: {ocr_check.get('current_model', 'auto')})"
-                use_ocr = True
+        
+        # Check if file is PDF and needs OCR
+        if file_ext == '.pdf':
+            if request.is_scanned:
+                # User explicitly marked as scanned
+                from services.ocr_service import get_ocr_status, is_trocr_available
+                ocr_check = get_ocr_status()
+                logger.info(f"📄 PDF file with is_scanned=True: {file_name}")
+                logger.info(f"TrOCR status: available={ocr_check.get('trocr_available', False)}, loaded={ocr_check.get('trocr_model_loaded', False)}")
+                
+                if ocr_check.get("trocr_available", False):
+                    # Try to initialize TrOCR if not already loaded
+                    if not ocr_check.get("trocr_model_loaded", False):
+                        logger.info("TrOCR model not loaded, initializing...")
+                        if is_trocr_available():
+                            logger.info("✓ TrOCR model initialized successfully")
+                        else:
+                            logger.error("✗ Failed to initialize TrOCR model")
+                    
+                    logger.info(f"📄 Scanned PDF detected: {file_name} - TrOCR will be applied during parsing")
+                    ocr_status = f"TrOCR will be applied during indexing (model: {ocr_check.get('current_model', 'auto')})"
+                    use_ocr = True
+                else:
+                    logger.warning("TrOCR not available. Cannot process scanned PDF.")
+                    ocr_status = "WARNING: TrOCR not available - install: pip install transformers torch pillow"
             else:
-                logger.warning("TrOCR not available. Cannot process scanned PDF.")
-                ocr_status = "WARNING: TrOCR not available - install: pip install transformers torch pillow"
+                # Auto-detect if PDF is scanned (even if is_scanned=False)
+                from services.ocr_service import detect_scanned_pdf
+                try:
+                    is_scanned, detection_info = detect_scanned_pdf(file_location)
+                    if is_scanned:
+                        logger.info(f"📄 Auto-detected scanned PDF: {file_name} (confidence: {detection_info.get('confidence', 'unknown')})")
+                        from services.ocr_service import get_ocr_status, is_trocr_available
+                        ocr_check = get_ocr_status()
+                        if ocr_check.get("trocr_available", False):
+                            logger.info("Auto-enabling TrOCR for scanned PDF")
+                            ocr_status = f"Auto-detected scanned PDF - TrOCR will be applied (model: {ocr_check.get('current_model', 'auto')})"
+                            use_ocr = True
+                        else:
+                            logger.warning("Scanned PDF detected but TrOCR not available")
+                            ocr_status = "WARNING: Scanned PDF detected but TrOCR not available"
+                except Exception as e:
+                    logger.warning(f"Could not auto-detect PDF type: {str(e)}")
 
         # Parse document and create embeddings for SESSION_FAISS
         from services.document_parser import parse_document
@@ -752,30 +785,95 @@ async def store_file(request: ExcelFileInput = Depends()):
         from services.multimodal_embeddings import get_multimodal_embeddings
         
         logger.info(f"Parsing document and creating embeddings for session: {session_id}")
-        documents = parse_document(file_location, use_ocr=use_ocr)
+        logger.info(f"  File: {file_name}")
+        logger.info(f"  Use OCR: {use_ocr}")
+        logger.info(f"  File extension: {file_ext}")
         
-        if not documents:
+        try:
+            documents = parse_document(file_location, use_ocr=use_ocr)
+            logger.info(f"✓ Parsed {len(documents)} document chunks from {file_name}")
+            
+            if not documents:
+                logger.warning(f"No documents extracted from {file_name}")
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "error": "No content could be extracted from the file",
+                        "session_id": session_id,
+                        "file_name": file_name,
+                        "use_ocr": use_ocr
+                    }
+                )
+            
+            # Log document details
+            for idx, doc in enumerate(documents[:3]):  # Log first 3 documents
+                logger.debug(f"  Document {idx}: {len(doc.page_content)} chars, metadata: {list(doc.metadata.keys())}")
+            
+        except Exception as e:
+            logger.exception(f"Error parsing document {file_name}: {str(e)}")
             return JSONResponse(
-                status_code=400,
+                status_code=500,
                 content={
-                    "error": "No content could be extracted from the file",
-                    "session_id": session_id
+                    "error": f"Error parsing document: {str(e)}",
+                    "session_id": session_id,
+                    "file_name": file_name
                 }
             )
         
         # Initialize SessionFAISSManager
-        embeddings = get_multimodal_embeddings(model_path="./all-MiniLM-L6-v2", device='cpu')
-        session_manager = SessionFAISSManager(session_id, embeddings)
-        
-        # Add uploaded file embeddings to SESSION_FAISS
-        success = session_manager.add_uploaded_file_embeddings(documents)
-        
-        if not success:
+        logger.info("Initializing embeddings model for session FAISS...")
+        try:
+            embeddings = get_multimodal_embeddings(model_path="./all-MiniLM-L6-v2", device='cpu')
+            logger.info("✓ Embeddings model loaded")
+        except Exception as e:
+            logger.exception(f"Error loading embeddings model: {str(e)}")
             return JSONResponse(
                 status_code=500,
                 content={
-                    "error": "Failed to create embeddings for the uploaded file",
+                    "error": f"Error loading embeddings model: {str(e)}",
                     "session_id": session_id
+                }
+            )
+        
+        try:
+            session_manager = SessionFAISSManager(session_id, embeddings)
+            logger.info(f"✓ SessionFAISSManager initialized for session: {session_id}")
+        except Exception as e:
+            logger.exception(f"Error initializing SessionFAISSManager: {str(e)}")
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "error": f"Error initializing session manager: {str(e)}",
+                    "session_id": session_id
+                }
+            )
+        
+        # Add uploaded file embeddings to SESSION_FAISS
+        logger.info(f"Creating embeddings for {len(documents)} document chunks...")
+        try:
+            success = session_manager.add_uploaded_file_embeddings(documents)
+            
+            if not success:
+                logger.error(f"Failed to create embeddings - add_uploaded_file_embeddings returned False")
+                return JSONResponse(
+                    status_code=500,
+                    content={
+                        "error": "Failed to create embeddings for the uploaded file",
+                        "session_id": session_id,
+                        "document_count": len(documents)
+                    }
+                )
+            
+            logger.info(f"✓ Successfully created embeddings for {len(documents)} chunks")
+            
+        except Exception as e:
+            logger.exception(f"Exception during embedding creation: {str(e)}")
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "error": f"Exception during embedding creation: {str(e)}",
+                    "session_id": session_id,
+                    "document_count": len(documents)
                 }
             )
         
