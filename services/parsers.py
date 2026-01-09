@@ -331,6 +331,9 @@ def process_file_query_json(
         else:
             llm_query = user_query
         
+        # Initialize db_to_use_for_chain (defaults to passed db)
+        db_to_use_for_chain = db
+        
         if session_manager and session_manager.has_uploaded_file():
             # CASE 1: User uploaded file - retrieve ONLY from SESSION_FAISS
             logger.info("Retrieving from SESSION_FAISS only (user uploaded file)")
@@ -342,6 +345,8 @@ def process_file_query_json(
                 logger.info("✅ Using SESSION_FAISS for chain retriever")
             else:
                 logger.warning("⚠️  Session FAISS not found, falling back to GLOBAL_FAISS")
+                if db is None:
+                    raise ValueError("Cannot proceed: Session FAISS not found and no global DB provided")
             
             # Retrieve from session using ORIGINAL query to avoid matching old conversation
             # The contextualized query is only for LLM understanding, not retrieval
@@ -359,6 +364,9 @@ def process_file_query_json(
             
         elif session_manager:
             # CASE 2: No uploaded file - retrieve from BOTH (global + session memory)
+            if db is None:
+                raise ValueError("Cannot proceed: No global DB provided for query without uploaded file")
+                
             logger.info("Retrieving from GLOBAL_FAISS + SESSION_FAISS (conversation memory)")
             
             # Get from file-specific FAISS
@@ -377,18 +385,29 @@ def process_file_query_json(
             
         else:
             # CASE 3: No session - retrieve from file FAISS only (legacy behavior)
+            if db is None:
+                raise ValueError("Cannot proceed: No DB provided and no session manager")
+                
             logger.info("Retrieving from file FAISS only (no session)")
             retrieved_docs = db.similarity_search(search_query, k=5)
         
         # Create chain with appropriate retriever (SESSION or GLOBAL)
-        if db_to_use_for_chain != db:
+        if db_to_use_for_chain is not None and db_to_use_for_chain != db:
             # Need to create a new chain with SESSION_FAISS retriever
             logger.info("Creating chain with SESSION_FAISS retriever")
             from services.chain_service import _create_qa_chain_from_db
             session_chain = _create_qa_chain_from_db(db_to_use_for_chain)
             chain_to_use = session_chain
-        else:
+        elif chain is not None:
+            # Use provided chain
             chain_to_use = chain
+        elif db_to_use_for_chain is not None:
+            # Create chain from db_to_use_for_chain if no chain provided
+            logger.info("Creating chain from db (chain was None)")
+            from services.chain_service import _create_qa_chain_from_db
+            chain_to_use = _create_qa_chain_from_db(db_to_use_for_chain)
+        else:
+            raise ValueError("Cannot proceed: No chain or DB available")
         
         # Extract PDF citations BEFORE LLM call so we can reference them
         docs_for_citation = retrieved_docs if retrieved_docs else []

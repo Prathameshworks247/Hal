@@ -449,8 +449,11 @@ async def rectification(request: QueryRequestFile, background_tasks: BackgroundT
             print("🔍 User Query:\n", final_query)
             print(f"📂 Querying from SESSION_FAISS (session: {session_id})")
             
-            # Get chain for session FAISS (reuse global chain since we're passing session_manager)
-            chain, db = get_chain_cached()
+            # For SESSION_FAISS queries, we don't need to load the global department-based index
+            # process_file_query_json() will handle SESSION_FAISS internally and create its own chain
+            # Pass None values that will be replaced by process_file_query_json() when using SESSION_FAISS
+            chain = None
+            db = None
             
             json_results, rectification_text = process_file_query_json(
                 chain, db, search_query, final_query, conversation_context,
