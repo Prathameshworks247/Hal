@@ -1060,30 +1060,30 @@ async def store_file(request: ExcelFileInput = Depends()):
                     documents, 
                     source_file=original_filename  # Use original filename, not timestamped
                 )
-            
-            if not success:
-                logger.error(f"Failed to create embeddings - add_uploaded_file_embeddings returned False")
+                
+                if not success:
+                    logger.error(f"Failed to create embeddings - add_uploaded_file_embeddings returned False")
+                    return JSONResponse(
+                        status_code=500,
+                        content={
+                            "error": "Failed to create embeddings for the uploaded file",
+                            "session_id": session_id,
+                            "document_count": len(documents)
+                        }
+                    )
+                
+                logger.info(f"✓ Successfully created embeddings for {len(documents)} chunks")
+                
+            except Exception as e:
+                logger.exception(f"Exception during embedding creation: {str(e)}")
                 return JSONResponse(
                     status_code=500,
                     content={
-                        "error": "Failed to create embeddings for the uploaded file",
+                        "error": f"Exception during embedding creation: {str(e)}",
                         "session_id": session_id,
                         "document_count": len(documents)
                     }
                 )
-            
-            logger.info(f"✓ Successfully created embeddings for {len(documents)} chunks")
-            
-        except Exception as e:
-            logger.exception(f"Exception during embedding creation: {str(e)}")
-            return JSONResponse(
-                status_code=500,
-                content={
-                    "error": f"Exception during embedding creation: {str(e)}",
-                    "session_id": session_id,
-                    "document_count": len(documents)
-                }
-            )
         
         # Update session metadata
         session_manager.metadata.uploaded_file_name = request.file.filename
