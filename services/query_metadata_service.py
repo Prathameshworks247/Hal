@@ -29,8 +29,8 @@ DEPARTMENTS (choose ONE or return null):
 - structures: Wing, fuselage, airframe, structural components
 - avionics: Electronics, navigation, communication systems, instruments
 - propulsion: Engines, fuel systems, exhaust, turbines
-- hydraulics: Hydraulic systems, landing gear, brakes
-- electrical: Electrical systems, wiring, batteries, generators
+- maintenance: General maintenance, service manuals, scheduling
+- general: if the query fits general aviation or multiple categories
 - null: If the query doesn't clearly fit any department
 
 DOCUMENT TYPES (choose ONE or return null):

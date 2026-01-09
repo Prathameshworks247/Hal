@@ -319,8 +319,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 @lru_cache()
-def get_chain_cached():
-    return get_chain()
+def get_chain_cached(department: str = None):
+    return get_chain(department)
+
 def get_chain_file_chached(file_name, pb_number):
     return get_chain_file(file_name, pb_number)
 
@@ -338,7 +339,6 @@ async def rectification(request: QueryRequestFile, background_tasks: BackgroundT
         logger.info(f"   Query: {final_query[:50]}...")
         logger.info(f"   File: {file_name}")
         logger.info(f"   Session: {session_id or 'NEW'}")
-        logger.info(f"   History: {len(conversation_history)} messages")
         
         # Get or create session_id
         if not session_id:
@@ -365,7 +365,6 @@ async def rectification(request: QueryRequestFile, background_tasks: BackgroundT
         # Use contextualized query for RAG retrieval
         if conversation_context["has_context"]:
             logger.info(f"Using conversational context: {conversation_context['context_summary']}")
-            # Use standalone query for better retrieval
             search_query = conversation_context["standalone_query"]
         else:
             search_query = final_query
@@ -379,32 +378,42 @@ async def rectification(request: QueryRequestFile, background_tasks: BackgroundT
                 "verification_details": verification_details
             }
         
-        logger.info(f"Query verified successfully. Quality score: {verification_details.get('quality_score', 0):.2f}")
-        
-        # Optional: Extract snag if present (for backward compatibility)
-        # But don't require it - allow general queries too
+        # Optional: Extract snag if present
         match = re.search(r"Snag:\s*(.*?)(\s+\w+:|$)", final_query)
         if match:
             snag_text = match.group(1).strip()
-            # Additional semantic check on snag text
             if not has_semantic_meaning(snag_text):
                 logger.warning(f"Snag text lacks semantic meaning: {snag_text}")
-                # Don't block - just log warning
 
         print("🚁 Aircraft Snag Resolution System - JSON Output")
+        
         if file_name == 'default':    
-            chain, db = get_chain_cached()
+            # DEPARTMENT ROUTING LOGIC
+            target_department = request.department
+            
+            # If department not provided, infer it for routing
+            if not target_department:
+                logger.info("Department not provided. Inferring from query for routing...")
+                from services.query_metadata_service import infer_query_metadata
+                inference = infer_query_metadata(final_query)
+                target_department = inference.get("department")
+                logger.info(f"Inferred routing department: {target_department}")
+            
+            # Load specific department index (or fallback)
+            chain, db = get_chain_cached(department=target_department)
+            
             if os.getenv("DEBUG_MODE") == "1":
                 test_retriever(db, "hydraulic system pressure low")
 
             print("🔍 Search Query:\n", search_query)
             print("🔍 User Query:\n", final_query)
+            print(f"📂 Routing to Department: {target_department or 'GLOBAL/GENERAL'}")
 
             json_results, rectification_text = process_snag_query_json(
                 chain, db, search_query, final_query, conversation_context,
                 session_manager=session_manager,
                 citation_session_id=session_id,
-                department=request.department,
+                department=target_department, # Pass explicit or inferred department
                 document_type=request.document_type
             )
             
@@ -1099,7 +1108,9 @@ def _get_query_recommendations(verification_details: Dict[str, Any]) -> List[str
 async def admin_ingest_file(
     file: UploadFile = File(...),
     incremental: bool = Form(True),
-    index_path: str = Form("snag_faiss_index")
+    index_path: str = Form("snag_faiss_index"),
+    department: str = Form(None),
+    document_type: str = Form(None)
 ):
     """
     Admin endpoint: Ingest a single file into the global FAISS index.
@@ -1116,13 +1127,15 @@ async def admin_ingest_file(
         with open(temp_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         
-        logger.info(f"Admin ingesting file: {file_name}")
+        logger.info(f"Admin ingesting file: {file_name} (Dept: {department})")
         
         # Ingest file
         result = ingest_single_file(
             file_path=temp_path,
             index_path=index_path,
-            incremental=incremental
+            incremental=incremental,
+            department=department,
+            document_type=document_type
         )
         
         # Clean up temp file

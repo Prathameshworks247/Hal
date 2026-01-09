@@ -35,7 +35,7 @@ def ingest_single_file(
     
     Args:
         file_path: Path to the file to ingest
-        index_path: Path to FAISS index directory
+        index_path: Base path to FAISS index directory (default: "snag_faiss_index")
         incremental: If True, add to existing index; if False, create new
         use_ocr: If True, use OCR for scanned PDFs
         department: Department classification (e.g., 'structures', 'avionics', 'propulsion')
@@ -44,6 +44,22 @@ def ingest_single_file(
     Returns:
         Dictionary with ingestion results
     """
+    # Determine the actual index path based on department routing
+    base_index_path = index_path
+    if department:
+        # Route to department-specific index: snag_faiss_index/{department}/faiss_index
+        target_path = os.path.join(base_index_path, department.lower(), "faiss_index")
+        index_path = target_path
+        logger.info(f"Routing ingestion to DEPARTMENT index: {index_path}")
+    else:
+        # Route to general index: snag_faiss_index/general/faiss_index
+        target_path = os.path.join(base_index_path, "general", "faiss_index")
+        index_path = target_path
+        logger.info(f"Routing ingestion to GENERAL index: {index_path}")
+
+    # Ensure the directory exists
+    os.makedirs(os.path.dirname(index_path), exist_ok=True)
+
     try:
         if not os.path.exists(file_path):
             return {
@@ -213,24 +229,40 @@ def ingest_directory(
 
 def rebuild_index_from_scratch(
     source_paths: List[str],
-    index_path: str = "snag_faiss_index"
+    index_path: str = "snag_faiss_index",
+    department: Optional[str] = None
 ) -> dict:
     """
     Rebuild the entire FAISS index from scratch.
     
     Args:
         source_paths: List of file or directory paths to ingest
-        index_path: Path to FAISS index directory
+        index_path: Base path to FAISS index directory
+        department: Optional department for routing (e.g., 'structures')
     
     Returns:
         Dictionary with rebuild results
     """
     try:
-        logger.info("🔄 Rebuilding FAISS index from scratch...")
+        # Determine target index path
+        base_index_path = index_path
+        if department:
+            target_path = os.path.join(base_index_path, department.lower(), "faiss_index")
+            index_path = target_path
+            logger.info(f"Routing rebuild to DEPARTMENT index: {index_path}")
+        else:
+            target_path = os.path.join(base_index_path, "general", "faiss_index")
+            index_path = target_path
+            logger.info(f"Routing rebuild to GENERAL index: {index_path}")
+            
+        os.makedirs(os.path.dirname(index_path), exist_ok=True)
+            
+        logger.info(f"🔄 Rebuilding FAISS index from scratch at {index_path}...")
         
         # Collect all documents
         all_documents = []
         processed_files = []
+
         failed_files = []
         
         for source_path in source_paths:
@@ -407,8 +439,22 @@ if __name__ == "__main__":
         
         elif command == "rebuild" and len(sys.argv) > 2:
             # Rebuild index
-            paths = sys.argv[2:]
-            result = rebuild_index_from_scratch(paths)
+            paths = []
+            department = None
+            
+            # Parse args
+            i = 2
+            while i < len(sys.argv):
+                arg = sys.argv[i]
+                if arg == "--department" or arg == "-d":
+                    if i + 1 < len(sys.argv):
+                        department = sys.argv[i + 1]
+                        i += 1
+                else:
+                    paths.append(arg)
+                i += 1
+            
+            result = rebuild_index_from_scratch(paths, department=department)
             print(result)
         
         elif command == "info":

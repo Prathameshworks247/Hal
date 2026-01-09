@@ -13,9 +13,11 @@ from services.excel_service import excel_to_documents
 from services.document_parser import parse_document
 from services.multimodal_embeddings import get_multimodal_embeddings
 
+from typing import Optional
+
 logger = logging.getLogger(__name__)
 
-def get_chain():
+def get_chain(department: Optional[str] = None):
     try:
         logger.info("Initializing embeddings model...")
         model_path = "./all-MiniLM-L6-v2"
@@ -26,9 +28,38 @@ def get_chain():
         embeddings = get_multimodal_embeddings(model_path=model_path, device='cpu')
         logger.info("Multimodal embeddings model loaded successfully.")
 
-        logger.info("Loading FAISS index...")
-        # Check if FAISS index exists
-        faiss_index_path = "snag_faiss_index"
+        logger.info(f"Loading FAISS index for department: {department or 'GLOBAL'}...")
+        
+        # Base index path
+        base_path = "snag_faiss_index"
+        
+        # Determine specific index path based on department routing
+        if department:
+            # Route to department-specific index
+            # Structure: snag_faiss_index/{department}/faiss_index
+            target_path = os.path.join(base_path, department.lower(), "faiss_index")
+            if os.path.exists(target_path):
+                faiss_index_path = target_path
+                logger.info(f"Routing to {department} index at: {faiss_index_path}")
+            else:
+                # Fallback to general index if department index missing
+                logger.warning(f"Department index not found at {target_path}. Falling back to GENERAL index.")
+                faiss_index_path = os.path.join(base_path, "general", "faiss_index")
+                
+                # Double fallback to root path if even general/faiss_index structure not present (backward compatibility)
+                if not os.path.exists(faiss_index_path):
+                     logger.warning(f"General index not found at {faiss_index_path}. Falling back to ROOT index.")
+                     faiss_index_path = base_path
+        else:
+            # No department provided - use general index or legacy root
+            # Try general subfolder first (new structure)
+            general_path = os.path.join(base_path, "general", "faiss_index")
+            if os.path.exists(general_path):
+                faiss_index_path = general_path
+            else:
+                # Legacy root path
+                faiss_index_path = base_path
+
         if not os.path.exists(faiss_index_path):
             raise FileNotFoundError(f"FAISS index not found at {faiss_index_path}")
         
@@ -37,7 +68,7 @@ def get_chain():
             embeddings=embeddings, 
             allow_dangerous_deserialization=True
         )
-        logger.info("FAISS index loaded successfully.")
+        logger.info(f"FAISS index loaded successfully from {faiss_index_path}.")
 
         retriever = db.as_retriever(search_type="similarity", search_kwargs={"k": 5}) 
         logger.info("Retriever configured successfully.")
