@@ -93,33 +93,47 @@ def parse_pdf(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200, 
         logger.info(f"✓ TrOCR completed: {ocr_result['processed_pages']} pages, avg confidence: {ocr_result['avg_confidence']}%, engine: {ocr_result.get('ocr_engine', 'TrOCR')}")
         
         # Process OCR results into documents (text from pages)
+        total_ocr_text = 0
         for page_result in ocr_result["pages"]:
-            if page_result["success"] and page_result["text"]:
-                text = page_result["text"]
-                page_num = page_result["page_number"]
+            page_num = page_result["page_number"]
+            success = page_result.get("success", False)
+            text = page_result.get("text", "").strip() if success else ""
+            char_count = page_result.get("char_count", 0)
+            
+            logger.info(f"Page {page_num}: OCR success={success}, chars={char_count}, text_preview={text[:50] if text else 'N/A'}...")
+            
+            if success and text:
+                total_ocr_text += len(text)
                 model_type = page_result.get("model_type", "printed")
+                confidence = page_result.get("confidence", 0)
                 
                 # Chunk the OCR text
                 chunks = _chunk_text(text, chunk_size, chunk_overlap)
+                logger.debug(f"Page {page_num}: Created {len(chunks)} chunks from {len(text)} chars")
+                
                 for chunk_idx, chunk in enumerate(chunks):
-                    documents.append(Document(
-                        page_content=chunk,
-                        metadata={
-                            "source": file_name,
-                            "file_path": file_path,
-                            "page_number": page_num,
-                            "chunk_index": chunk_idx,
-                            "total_chunks_in_page": len(chunks),
-                            "file_type": "pdf",
-                            "ocr_applied": True,
-                            "ocr_engine": "TrOCR",
-                            "ocr_model_type": model_type,
-                            "ocr_confidence": page_result["confidence"],
-                            "ingestion_timestamp": datetime.now().isoformat(),
-                            "total_pages": total_pages,
-                            "citation": f"{file_name}, Page {page_num} (TrOCR-{model_type})"
-                        }
-                    ))
+                    if chunk and chunk.strip():  # Only add non-empty chunks
+                        documents.append(Document(
+                            page_content=chunk,
+                            metadata={
+                                "source": file_name,
+                                "file_path": file_path,
+                                "page_number": page_num,
+                                "chunk_index": chunk_idx,
+                                "total_chunks_in_page": len(chunks),
+                                "file_type": "pdf",
+                                "ocr_applied": True,
+                                "ocr_engine": "TrOCR",
+                                "ocr_model_type": model_type,
+                                "ocr_confidence": confidence,
+                                "ingestion_timestamp": datetime.now().isoformat(),
+                                "total_pages": total_pages,
+                                "citation": f"{file_name}, Page {page_num} (TrOCR-{model_type})"
+                            }
+                        ))
+            else:
+                error_msg = page_result.get("error", "Unknown error")
+                logger.warning(f"Page {page_num}: OCR failed or no text extracted - {error_msg}")
         
         # Extract and process images from each page with TrOCR
         logger.info(f"Extracting images from {total_pages} pages and applying TrOCR...")
@@ -227,10 +241,19 @@ def parse_pdf(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200, 
         image_desc_chunks = len([d for d in documents if d.metadata.get("type") == "image_description"])
         
         logger.info(f"✓ Created {len(documents)} TrOCR document chunks from {file_name}:")
-        logger.info(f"  - {text_chunks} text chunks (page OCR)")
+        logger.info(f"  - {text_chunks} text chunks (page OCR, {total_ocr_text} total chars)")
         logger.info(f"  - {image_ocr_chunks} image OCR chunks")
         logger.info(f"  - {image_desc_chunks} image description chunks")
         logger.info(f"  - {image_count} total images processed")
+        
+        if total_ocr_text < 50:
+            logger.warning(f"⚠️  Very little text extracted via OCR ({total_ocr_text} chars)")
+            logger.warning(f"   This might indicate: 1) Poor image quality, 2) Wrong model type, 3) PDF is mostly images")
+        
+        if not documents:
+            logger.error(f"✗ No documents created from PDF with OCR: {file_name}")
+            logger.error(f"   Total OCR text: {total_ocr_text} characters")
+            raise RuntimeError(f"OCR processing resulted in no extractable content from {file_name}")
         
         return documents
     
@@ -264,12 +287,19 @@ def parse_pdf(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200, 
             # Use PyMuPDF (fitz)
             doc = fitz.open(file_path)
             total_pages = len(doc)
+            total_text_extracted = 0
+            
             for page_num in range(total_pages):
                 page = doc[page_num]
                 text = page.get_text()
                 
+                # Log text extraction for debugging
+                text_length = len(text.strip()) if text else 0
+                logger.debug(f"Page {page_num + 1}: Extracted {text_length} characters")
+                
                 # Rule 1: If page has text → treat as text (authoritative)
                 if text and text.strip():
+                    total_text_extracted += text_length
                     # Chunk the page text (unchanged - remains authoritative)
                     chunks = _chunk_text(text, chunk_size, chunk_overlap)
                     for chunk_idx, chunk in enumerate(chunks):
@@ -287,6 +317,11 @@ def parse_pdf(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200, 
                                 "citation": f"{file_name}, Page {page_num + 1}"
                             }
                         ))
+                elif text_length <= 10:
+                    # Very little text extracted - likely scanned PDF
+                    logger.warning(f"Page {page_num + 1}: Only {text_length} characters extracted - PDF may be scanned. Consider using OCR mode.")
+                else:
+                    logger.debug(f"Page {page_num + 1}: No text extracted")
                     
                     # Rule 2 & 3: Extract images from this page and pass to vision model
                     page_images = _extract_images_from_pdf_page(page, page_num + 1, file_name)
@@ -323,8 +358,31 @@ def parse_pdf(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200, 
                             continue
                             
             doc.close()
+            
+            # Check if we got very little text - might be a scanned PDF
+            # Auto-fallback to OCR if text extraction yields < 50 chars
+            if total_text_extracted < 50 and total_pages > 0 and not use_ocr:
+                logger.warning(f"⚠️  Very little text extracted ({total_text_extracted} chars from {total_pages} pages)")
+                logger.warning(f"   Attempting automatic OCR fallback...")
+                
+                try:
+                    from services.ocr_service import ocr_pdf_document, is_trocr_available
+                    if is_trocr_available():
+                        logger.info(f"🔄 Auto-enabling TrOCR for scanned PDF: {file_name}")
+                        # Recursively call with OCR enabled
+                        return parse_pdf(file_path, chunk_size, chunk_overlap, use_ocr=True)
+                    else:
+                        logger.warning(f"   TrOCR not available for auto-fallback")
+                except Exception as e:
+                    logger.warning(f"   OCR fallback failed: {str(e)}")
+                    logger.warning(f"   This PDF may be scanned. Try uploading with is_scanned=True to enable OCR")
+            
+            if not documents:
+                logger.error(f"✗ No documents created from PDF: {file_name}")
+                logger.error(f"   Total text extracted: {total_text_extracted} characters from {total_pages} pages")
+                logger.error(f"   This might be a scanned PDF - try using OCR mode (is_scanned=True)")
         
-        logger.info(f"✓ Parsed PDF: {file_name}, {len(documents)} chunks from {documents[0].metadata.get('total_pages', 'unknown')} pages")
+        logger.info(f"✓ Parsed PDF: {file_name}, {len(documents)} chunks from {total_pages} pages, {total_text_extracted} total chars")
         return documents
         
     except Exception as e:

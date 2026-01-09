@@ -788,10 +788,24 @@ async def store_file(request: ExcelFileInput = Depends()):
         logger.info(f"  File: {file_name}")
         logger.info(f"  Use OCR: {use_ocr}")
         logger.info(f"  File extension: {file_ext}")
+        logger.info(f"  File path: {file_location}")
         
         try:
             documents = parse_document(file_location, use_ocr=use_ocr)
             logger.info(f"✓ Parsed {len(documents)} document chunks from {file_name}")
+            
+            # Log content preview for debugging
+            if documents:
+                total_chars = sum(len(doc.page_content) for doc in documents)
+                logger.info(f"  Total characters extracted: {total_chars}")
+                logger.info(f"  First chunk preview: {documents[0].page_content[:100]}...")
+                
+                # Check if we got very little content
+                if total_chars < 50:
+                    logger.warning(f"⚠️  WARNING: Only {total_chars} characters extracted from {file_name}")
+                    logger.warning(f"   This might be a scanned PDF. Try uploading with is_scanned=True")
+            else:
+                logger.error(f"✗ No documents extracted from {file_name}")
             
             if not documents:
                 logger.warning(f"No documents extracted from {file_name}")
