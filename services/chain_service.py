@@ -73,21 +73,23 @@ CRITICAL INSTRUCTION:
 - Do NOT repeat or summarize information from previous conversation turns.
 - If the query asks for a complete list (e.g., "all supervisors", "all names", "all departments"), extract and provide the FULL, COMPLETE list from the HISTORICAL RECORDS above.
 - If the query is a follow-up asking for "all" of something, treat it as a NEW request - extract ALL items from the documents, not just what was mentioned before.
+- If the query is a COMPARISON request, identify which file version each citation belongs to based on metadata (source_file, file_name, or version information). Clearly indicate in your response which version each piece of information comes from. Compare the content systematically: identify additions, removals, and modifications between versions.
 - Base your answer ONLY on the HISTORICAL RECORDS provided above.
 
 ---
 
 STEP 1: INTENT CLASSIFICATION
-Classify the user's query into one of three categories:
+Classify the user's query into one of four categories:
 - SNAG: The query describes a specific malfunction, defect, or problem requiring rectification
 - INSPECTION: The query asks about inspection procedures, checklists, or preventive maintenance
 - CONCEPTUAL: The query asks for general knowledge, explanations, or theoretical information
+- COMPARISON: The query asks to compare two versions of uploaded files, identifying differences, additions, removals, or changes between versions
 
 ---
 
 STEP 2: CREATE STRUCTURED RESPONSE
 Organize your response into sections based on the intent. Each section should have:
-- type: One of: "concept_explanation", "system_description", "rectification", "inspection", "problem_analysis", "root_cause", "safety_precautions", "parts_required", "tools_required", "acceptance_criteria", "operational_principles", "related_components", "common_issues"
+- type: One of: "concept_explanation", "system_description", "rectification", "inspection", "problem_analysis", "root_cause", "safety_precautions", "parts_required", "tools_required", "acceptance_criteria", "operational_principles", "related_components", "common_issues", "version_comparison", "added_content", "removed_content", "modified_content", "unchanged_content", "version_details"
 - title: A human-readable heading for the section
 - content: Clean paragraph text (NO markdown, NO headings, NO bullet points - just plain text)
 - citations: Array of citation IDs (e.g., ["cite_1", "cite_2"]) that reference the available citations
@@ -97,7 +99,7 @@ Organize your response into sections based on the intent. Each section should ha
 REQUIRED JSON SCHEMA (respond with ONLY this structure):
 
 {{
-  "intent": "SNAG | INSPECTION | CONCEPTUAL",
+  "intent": "SNAG | INSPECTION | CONCEPTUAL | COMPARISON",
   "sections": [
     {{
       "type": "section_type",
@@ -130,6 +132,14 @@ For CONCEPTUAL intent, use types like:
 - "operational_principles": Key operational principles
 - "related_components": Related systems/components
 - "common_issues": Typical problems (if applicable)
+
+For COMPARISON intent, use types like:
+- "version_details": Information about the file versions being compared (version numbers, dates, filenames)
+- "version_comparison": Overall summary of the comparison highlighting key differences
+- "added_content": New content, sections, or information added in the newer version
+- "removed_content": Content, sections, or information removed from the older version
+- "modified_content": Content that was changed, updated, or modified between versions
+- "unchanged_content": Content that remained the same across both versions (if relevant)
 
 ---
 
@@ -215,21 +225,23 @@ CRITICAL INSTRUCTION:
 - Do NOT repeat or summarize information from previous conversation turns.
 - If the question asks for a complete list (e.g., "all supervisors", "all names", "all departments"), extract and provide the FULL, COMPLETE list from the RELEVANT DOCUMENT EXCERPTS above.
 - If the question is a follow-up asking for "all" of something, treat it as a NEW request - extract ALL items from the documents, not just what was mentioned before.
+- If the question is a COMPARISON request, identify which file version each citation belongs to based on metadata (source_file, file_name, or version information). Clearly indicate in your response which version each piece of information comes from. Compare the content systematically: identify additions, removals, and modifications between versions.
 - Base your answer ONLY on the RELEVANT DOCUMENT EXCERPTS provided above.
 
 ---
 
 STEP 1: INTENT CLASSIFICATION
-Classify the user's query into one of three categories:
+Classify the user's query into one of four categories:
 - SNAG: The query describes a specific malfunction, defect, or problem requiring rectification
 - INSPECTION: The query asks about inspection procedures, checklists, or preventive maintenance
 - CONCEPTUAL: The query asks for general knowledge, explanations, or theoretical information
+- COMPARISON: The query asks to compare two versions of uploaded files, identifying differences, additions, removals, or changes between versions
 
 ---
 
 STEP 2: CREATE STRUCTURED RESPONSE
 Organize your response into sections based on the intent. Each section should have:
-- type: One of: "concept_explanation", "system_description", "rectification", "inspection", "problem_analysis", "root_cause", "safety_precautions", "parts_required", "tools_required", "acceptance_criteria", "operational_principles", "related_components", "common_issues"
+- type: One of: "concept_explanation", "system_description", "rectification", "inspection", "problem_analysis", "root_cause", "safety_precautions", "parts_required", "tools_required", "acceptance_criteria", "operational_principles", "related_components", "common_issues", "version_comparison", "added_content", "removed_content", "modified_content", "unchanged_content", "version_details"
 - title: A human-readable heading for the section
 - content: Clean paragraph text (NO markdown, NO headings, NO bullet points - just plain text)
 - citations: Array of citation IDs (e.g., ["cite_1", "cite_2"]) that reference the available citations
@@ -239,7 +251,7 @@ Organize your response into sections based on the intent. Each section should ha
 REQUIRED JSON SCHEMA (respond with ONLY this structure):
 
 {{
-  "intent": "SNAG | INSPECTION | CONCEPTUAL",
+  "intent": "SNAG | INSPECTION | CONCEPTUAL | COMPARISON",
   "sections": [
     {{
       "type": "section_type",
@@ -272,6 +284,14 @@ For CONCEPTUAL intent, use types like:
 - "operational_principles": Key operational principles
 - "related_components": Related systems/components
 - "common_issues": Typical problems (if applicable)
+
+For COMPARISON intent, use types like:
+- "version_details": Information about the file versions being compared (version numbers, dates, filenames)
+- "version_comparison": Overall summary of the comparison highlighting key differences
+- "added_content": New content, sections, or information added in the newer version
+- "removed_content": Content, sections, or information removed from the older version
+- "modified_content": Content that was changed, updated, or modified between versions
+- "unchanged_content": Content that remained the same across both versions (if relevant)
 
 ---
 
@@ -354,21 +374,23 @@ CRITICAL INSTRUCTION:
 - Do NOT repeat or summarize information from previous conversation turns.
 - If the question asks for a complete list (e.g., "all supervisors", "all names", "all departments"), extract and provide the FULL, COMPLETE list from the RELEVANT DOCUMENT EXCERPTS above.
 - If the question is a follow-up asking for "all" of something, treat it as a NEW request - extract ALL items from the documents, not just what was mentioned before.
+- If the question is a COMPARISON request, identify which file version each citation belongs to based on metadata (source_file, file_name, or version information). Clearly indicate in your response which version each piece of information comes from. Compare the content systematically: identify additions, removals, and modifications between versions.
 - Base your answer ONLY on the RELEVANT DOCUMENT EXCERPTS provided above.
 
 ---
 
 STEP 1: INTENT CLASSIFICATION
-Classify the user's query into one of three categories:
+Classify the user's query into one of four categories:
 - SNAG: The query describes a specific malfunction, defect, or problem requiring rectification
 - INSPECTION: The query asks about inspection procedures, checklists, or preventive maintenance
 - CONCEPTUAL: The query asks for general knowledge, explanations, or theoretical information
+- COMPARISON: The query asks to compare two versions of uploaded files, identifying differences, additions, removals, or changes between versions
 
 ---
 
 STEP 2: CREATE STRUCTURED RESPONSE
 Organize your response into sections based on the intent. Each section should have:
-- type: One of: "concept_explanation", "system_description", "rectification", "inspection", "problem_analysis", "root_cause", "safety_precautions", "parts_required", "tools_required", "acceptance_criteria", "operational_principles", "related_components", "common_issues"
+- type: One of: "concept_explanation", "system_description", "rectification", "inspection", "problem_analysis", "root_cause", "safety_precautions", "parts_required", "tools_required", "acceptance_criteria", "operational_principles", "related_components", "common_issues", "version_comparison", "added_content", "removed_content", "modified_content", "unchanged_content", "version_details"
 - title: A human-readable heading for the section
 - content: Clean paragraph text (NO markdown, NO headings, NO bullet points - just plain text)
 - citations: Array of citation IDs (e.g., ["cite_1", "cite_2"]) that reference the available citations
@@ -378,7 +400,7 @@ Organize your response into sections based on the intent. Each section should ha
 REQUIRED JSON SCHEMA (respond with ONLY this structure):
 
 {{
-  "intent": "SNAG | INSPECTION | CONCEPTUAL",
+  "intent": "SNAG | INSPECTION | CONCEPTUAL | COMPARISON",
   "sections": [
     {{
       "type": "section_type",
@@ -411,6 +433,14 @@ For CONCEPTUAL intent, use types like:
 - "operational_principles": Key operational principles
 - "related_components": Related systems/components
 - "common_issues": Typical problems (if applicable)
+
+For COMPARISON intent, use types like:
+- "version_details": Information about the file versions being compared (version numbers, dates, filenames)
+- "version_comparison": Overall summary of the comparison highlighting key differences
+- "added_content": New content, sections, or information added in the newer version
+- "removed_content": Content, sections, or information removed from the older version
+- "modified_content": Content that was changed, updated, or modified between versions
+- "unchanged_content": Content that remained the same across both versions (if relevant)
 
 ---
 
