@@ -1040,50 +1040,50 @@ async def store_file(request: ExcelFileInput = Depends()):
                 }
             )
         
-            # Ensure metadata includes session_id, source_file, and citation with original filename
-            original_filename = request.file.filename
-            for doc in documents:
-                doc.metadata["session_id"] = session_id
-                doc.metadata["source_file"] = original_filename  # Original filename (not timestamped)
-                # Update citation to use original filename
-                page_num = doc.metadata.get("page_number")
-                if page_num:
-                    citation = f"{original_filename}, Page {page_num}"
-                else:
-                    citation = original_filename
-                doc.metadata["citation"] = citation
+        # Ensure metadata includes session_id, source_file, and citation with original filename
+        original_filename = request.file.filename
+        for doc in documents:
+            doc.metadata["session_id"] = session_id
+            doc.metadata["source_file"] = original_filename  # Original filename (not timestamped)
+            # Update citation to use original filename
+            page_num = doc.metadata.get("page_number")
+            if page_num:
+                citation = f"{original_filename}, Page {page_num}"
+            else:
+                citation = original_filename
+            doc.metadata["citation"] = citation
+        
+        # Add uploaded file embeddings to SESSION_FAISS (incremental)
+        logger.info(f"Creating embeddings for {len(documents)} document chunks...")
+        try:
+            success = session_manager.add_uploaded_file_embeddings(
+                documents, 
+                source_file=original_filename  # Use original filename, not timestamped
+            )
             
-            # Add uploaded file embeddings to SESSION_FAISS (incremental)
-            logger.info(f"Creating embeddings for {len(documents)} document chunks...")
-            try:
-                success = session_manager.add_uploaded_file_embeddings(
-                    documents, 
-                    source_file=original_filename  # Use original filename, not timestamped
-                )
-                
-                if not success:
-                    logger.error(f"Failed to create embeddings - add_uploaded_file_embeddings returned False")
-                    return JSONResponse(
-                        status_code=500,
-                        content={
-                            "error": "Failed to create embeddings for the uploaded file",
-                            "session_id": session_id,
-                            "document_count": len(documents)
-                        }
-                    )
-                
-                logger.info(f"✓ Successfully created embeddings for {len(documents)} chunks")
-                
-            except Exception as e:
-                logger.exception(f"Exception during embedding creation: {str(e)}")
+            if not success:
+                logger.error(f"Failed to create embeddings - add_uploaded_file_embeddings returned False")
                 return JSONResponse(
                     status_code=500,
                     content={
-                        "error": f"Exception during embedding creation: {str(e)}",
+                        "error": "Failed to create embeddings for the uploaded file",
                         "session_id": session_id,
                         "document_count": len(documents)
                     }
                 )
+            
+            logger.info(f"✓ Successfully created embeddings for {len(documents)} chunks")
+            
+        except Exception as e:
+            logger.exception(f"Exception during embedding creation: {str(e)}")
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "error": f"Exception during embedding creation: {str(e)}",
+                    "session_id": session_id,
+                    "document_count": len(documents)
+                }
+            )
         
         # Update session metadata
         session_manager.metadata.uploaded_file_name = request.file.filename

@@ -160,15 +160,27 @@ class SessionFAISSManager:
                     logger.exception(f"Error appending to existing FAISS index: {str(e)}")
                     raise
             
-            # Ensure directory exists
-            os.makedirs(os.path.dirname(self.faiss_path), exist_ok=True)
+            # Ensure directory exists (faiss_path is already the directory path)
+            os.makedirs(self.faiss_path, exist_ok=True)
+            logger.debug(f"Ensured FAISS directory exists: {self.faiss_path}")
             
             # Save updated index to disk
             try:
+                logger.info(f"Saving FAISS index to: {self.faiss_path}")
                 faiss_index.save_local(self.faiss_path)
+                
+                # Verify the index was saved
+                index_file = os.path.join(self.faiss_path, "index.faiss")
+                if os.path.exists(index_file):
+                    logger.info(f"✓ Verified: FAISS index saved successfully to {index_file}")
+                else:
+                    logger.error(f"✗ Warning: FAISS index file not found after save: {index_file}")
+                
                 logger.info(f"✓ Saved session FAISS to: {self.faiss_path}")
             except Exception as e:
                 logger.exception(f"Error saving FAISS index to disk: {str(e)}")
+                logger.error(f"FAISS path: {self.faiss_path}")
+                logger.error(f"Directory exists: {os.path.exists(self.faiss_path)}")
                 raise
             
             # Update cache
