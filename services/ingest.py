@@ -73,44 +73,66 @@ def ingest_single_file(
         stats = manager_temp.get_embedding_stats(documents)
         logger.info(f"✓ Parsed {stats['total_documents']} chunks: {stats['text_chunks']} text, {stats['image_descriptions']} images")
         
-        # Determine department-specific index path
+        # Get multimodal embeddings model (reusable across multiple indices)
+        embeddings = get_multimodal_embeddings(model_path="./all-MiniLM-L6-v2", device='cpu')
+        
+        # Determine which indices to update
+        index_paths_to_update = []
+        
         if department:
             from services.department_routing import get_department_index_path, VALID_DEPARTMENTS
             dept_normalized = department.lower().strip()
             if dept_normalized not in VALID_DEPARTMENTS or dept_normalized == "default":
-                logger.warning(f"Invalid or 'default' department: {department}, using base index path")
-                actual_index_path = index_path
+                logger.warning(f"Invalid or 'default' department: {department}, using general index only")
+                # Use general index if invalid department
+                general_path = get_department_index_path("general")
+                index_paths_to_update = [general_path]
             else:
-                actual_index_path = get_department_index_path(dept_normalized)
-                logger.info(f"📂 Routing to department-specific index: {actual_index_path} (department: {dept_normalized})")
+                # Ingest into BOTH specific department AND general
+                dept_index_path = get_department_index_path(dept_normalized)
+                general_index_path = get_department_index_path("general")
+                index_paths_to_update = [dept_index_path, general_index_path]
+                logger.info(f"📂 Ingesting into department-specific index: {dept_index_path} AND general index: {general_index_path}")
         else:
-            actual_index_path = index_path
-            logger.info(f"📂 Using base index path: {actual_index_path} (no department specified)")
+            # No department specified - ingest only into general index
+            from services.department_routing import get_department_index_path
+            general_index_path = get_department_index_path("general")
+            index_paths_to_update = [general_index_path]
+            logger.info(f"📂 No department specified - ingesting into general index: {general_index_path}")
         
-        # Ensure directory exists (FAISS.save_local requires the exact directory to exist)
-        # os.makedirs creates all parent directories recursively
-        os.makedirs(actual_index_path, exist_ok=True)
-        logger.debug(f"Ensured directory exists: {actual_index_path}")
+        # Ingest into all determined indices
+        success_count = 0
+        failed_paths = []
         
-        # Get multimodal embeddings model
-        embeddings = get_multimodal_embeddings(model_path="./all-MiniLM-L6-v2", device='cpu')
+        for actual_index_path in index_paths_to_update:
+            # Ensure directory exists (FAISS.save_local requires the exact directory to exist)
+            os.makedirs(actual_index_path, exist_ok=True)
+            logger.debug(f"Ensured directory exists: {actual_index_path}")
+            
+            # Create or update index
+            success = create_or_update_index(
+                documents=documents,
+                index_path=actual_index_path,
+                embeddings=embeddings,
+                incremental=incremental
+            )
+            
+            if success:
+                success_count += 1
+                logger.info(f"✓ Successfully ingested {file_name} into {actual_index_path}")
+            else:
+                failed_paths.append(actual_index_path)
+                logger.error(f"✗ Failed to ingest {file_name} into {actual_index_path}")
         
-        # Create or update index
-        success = create_or_update_index(
-            documents=documents,
-            index_path=actual_index_path,
-            embeddings=embeddings,
-            incremental=incremental
-        )
-        
-        if success:
-            logger.info(f"✓ Successfully ingested {file_name}")
+        if success_count > 0:
             return {
                 "success": True,
                 "file_name": file_name,
                 "file_type": file_ext,
                 "num_chunks": len(documents),
-                "index_path": actual_index_path,
+                "index_paths": index_paths_to_update,
+                "successful_indices": success_count,
+                "failed_indices": failed_paths,
                 "base_index_path": index_path,
                 "department": department,
                 "incremental": incremental
@@ -118,7 +140,7 @@ def ingest_single_file(
         else:
             return {
                 "success": False,
-                "error": f"Failed to add {file_name} to index"
+                "error": f"Failed to add {file_name} to any index. Failed paths: {failed_paths}"
             }
             
     except Exception as e:
@@ -289,54 +311,77 @@ def rebuild_index_from_scratch(
         stats = manager_temp.get_embedding_stats(all_documents)
         logger.info(f"📊 Total documents: {stats['total_documents']} ({stats['text_chunks']} text, {stats['image_descriptions']} images)")
         
-        # Determine department-specific index path
+        # Create multimodal embeddings (reusable across multiple indices)
+        embeddings = get_multimodal_embeddings(model_path="./all-MiniLM-L6-v2", device='cpu')
+        
+        # Determine which indices to rebuild
+        index_paths_to_rebuild = []
+        
         if department:
             from services.department_routing import get_department_index_path, VALID_DEPARTMENTS
             dept_normalized = department.lower().strip()
             if dept_normalized not in VALID_DEPARTMENTS or dept_normalized == "default":
-                logger.warning(f"Invalid or 'default' department: {department}, using base index path")
-                actual_index_path = index_path
+                logger.warning(f"Invalid or 'default' department: {department}, using general index only")
+                # Use general index if invalid department
+                general_path = get_department_index_path("general")
+                index_paths_to_rebuild = [general_path]
             else:
-                actual_index_path = get_department_index_path(dept_normalized)
-                logger.info(f"📂 Rebuilding department-specific index: {actual_index_path} (department: {dept_normalized})")
+                # Rebuild BOTH specific department AND general
+                dept_index_path = get_department_index_path(dept_normalized)
+                general_index_path = get_department_index_path("general")
+                index_paths_to_rebuild = [dept_index_path, general_index_path]
+                logger.info(f"📂 Rebuilding department-specific index: {dept_index_path} AND general index: {general_index_path}")
         else:
-            actual_index_path = index_path
-            logger.info(f"📂 Rebuilding base index: {actual_index_path}")
+            # No department specified - rebuild only general index
+            from services.department_routing import get_department_index_path
+            general_index_path = get_department_index_path("general")
+            index_paths_to_rebuild = [general_index_path]
+            logger.info(f"📂 No department specified - rebuilding general index: {general_index_path}")
         
-        # Ensure directory exists (FAISS.save_local requires the exact directory to exist)
-        # os.makedirs creates all parent directories recursively
-        os.makedirs(actual_index_path, exist_ok=True)
-        logger.debug(f"Ensured directory exists: {actual_index_path}")
+        # Rebuild all determined indices
+        success_count = 0
+        failed_paths = []
         
-        # Create multimodal embeddings
-        embeddings = get_multimodal_embeddings(model_path="./all-MiniLM-L6-v2", device='cpu')
+        for actual_index_path in index_paths_to_rebuild:
+            # Ensure directory exists
+            os.makedirs(actual_index_path, exist_ok=True)
+            logger.debug(f"Ensured directory exists: {actual_index_path}")
+            
+            # Create new index
+            logger.info(f"🔨 Building FAISS index: {actual_index_path}...")
+            vectorstore = FAISS.from_documents(all_documents, embedding=embeddings)
+            
+            # Save index
+            vectorstore.save_local(actual_index_path)
+            logger.info(f"✓ Index saved to: {actual_index_path}")
+            
+            # Initialize metadata
+            manager = IncrementalLearningManager(actual_index_path, embeddings)
+            manager.metadata["total_documents"] = len(all_documents)
+            manager._save_metadata()
+            
+            success_count += 1
         
-        # Create new index
-        logger.info("🔨 Building FAISS index...")
-        vectorstore = FAISS.from_documents(all_documents, embedding=embeddings)
-        
-        # Save index
-        vectorstore.save_local(actual_index_path)
-        logger.info(f"✓ Index saved to: {actual_index_path}")
-        
-        # Initialize metadata
-        manager = IncrementalLearningManager(actual_index_path, embeddings)
-        manager.metadata["total_documents"] = len(all_documents)
-        manager._save_metadata()
-        
-        return {
-            "success": True,
-            "total_documents": len(all_documents),
-            "processed_files": len(processed_files),
-            "failed_files": len(failed_files),
-            "index_path": actual_index_path,
-            "base_index_path": index_path,
-            "department": department,
-            "files": {
-                "processed": processed_files,
-                "failed": failed_files
+        if success_count > 0:
+            return {
+                "success": True,
+                "total_documents": len(all_documents),
+                "processed_files": len(processed_files),
+                "failed_files": len(failed_files),
+                "index_paths": index_paths_to_rebuild,
+                "successful_indices": success_count,
+                "base_index_path": index_path,
+                "department": department,
+                "files": {
+                    "processed": processed_files,
+                    "failed": failed_files
+                }
             }
-        }
+        else:
+            return {
+                "success": False,
+                "error": f"Failed to rebuild any index. Failed paths: {failed_paths}"
+            }
         
     except Exception as e:
         logger.error(f"✗ Error rebuilding index: {str(e)}")

@@ -397,8 +397,9 @@ async def rectification(request: QueryRequestFile, background_tasks: BackgroundT
         print("🚁 Aircraft Snag Resolution System - JSON Output")
         if file_name == 'default':    
             # Route to department-specific FAISS index
+            # When department is null, will use "general" index (no inference)
             department = request.department if hasattr(request, 'department') and request.department else None
-            logger.info(f"📂 Department routing: {department if department else 'null (will infer)'}")
+            logger.info(f"📂 Department routing: {department if department else 'null (will use general)'}")
             
             chain, db = get_chain_cached(department=department or "", query=final_query or "")
             

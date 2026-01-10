@@ -185,12 +185,9 @@ def route_to_department_faiss(department: Optional[str], query: Optional[str] = 
     
     # Determine department
     if actual_department is None or actual_department == "":
-        if query is None or query == "":
-            logger.warning("No department and no query provided, defaulting to general")
-            actual_department = "general"
-        else:
-            actual_department = infer_department(query)
-            logger.info(f"📂 Routing: department=None → inferred={actual_department}")
+        # When no department is selected, always use "general" index (no inference)
+        actual_department = "general"
+        logger.info(f"📂 Routing: department=None/null → using general index")
     else:
         actual_department = actual_department.lower().strip()
         logger.info(f"📂 Routing: department={actual_department} (from request)")
