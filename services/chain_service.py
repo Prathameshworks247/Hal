@@ -62,11 +62,18 @@ Your entire response must be a valid JSON object matching the exact schema below
 
 ---
 
-USER QUERY:
+CURRENT USER QUERY (ANSWER THIS QUESTION ONLY):
 {question}
 
 HISTORICAL RECORDS:
 {context}
+
+CRITICAL INSTRUCTION:
+- Answer ONLY the CURRENT USER QUERY above. Ignore any previous questions or answers mentioned in the query text.
+- Do NOT repeat or summarize information from previous conversation turns.
+- If the query asks for a complete list (e.g., "all supervisors", "all names", "all departments"), extract and provide the FULL, COMPLETE list from the HISTORICAL RECORDS above.
+- If the query is a follow-up asking for "all" of something, treat it as a NEW request - extract ALL items from the documents, not just what was mentioned before.
+- Base your answer ONLY on the HISTORICAL RECORDS provided above.
 
 ---
 
@@ -197,11 +204,18 @@ Your entire response must be a valid JSON object matching the exact schema below
 
 ---
 
-USER QUESTION:
+CURRENT USER QUESTION (ANSWER THIS QUESTION ONLY):
 {question}
 
 RELEVANT DOCUMENT EXCERPTS:
 {context}
+
+CRITICAL INSTRUCTION:
+- Answer ONLY the CURRENT USER QUESTION above. Ignore any previous questions or answers mentioned in the question text.
+- Do NOT repeat or summarize information from previous conversation turns.
+- If the question asks for a complete list (e.g., "all supervisors", "all names", "all departments"), extract and provide the FULL, COMPLETE list from the RELEVANT DOCUMENT EXCERPTS above.
+- If the question is a follow-up asking for "all" of something, treat it as a NEW request - extract ALL items from the documents, not just what was mentioned before.
+- Base your answer ONLY on the RELEVANT DOCUMENT EXCERPTS provided above.
 
 ---
 
@@ -329,11 +343,18 @@ Your entire response must be a valid JSON object matching the exact schema below
 
 ---
 
-USER QUESTION:
+CURRENT USER QUESTION (ANSWER THIS QUESTION ONLY):
 {question}
 
 RELEVANT DOCUMENT EXCERPTS:
 {context}
+
+CRITICAL INSTRUCTION:
+- Answer ONLY the CURRENT USER QUESTION above. Ignore any previous questions or answers mentioned in the question text.
+- Do NOT repeat or summarize information from previous conversation turns.
+- If the question asks for a complete list (e.g., "all supervisors", "all names", "all departments"), extract and provide the FULL, COMPLETE list from the RELEVANT DOCUMENT EXCERPTS above.
+- If the question is a follow-up asking for "all" of something, treat it as a NEW request - extract ALL items from the documents, not just what was mentioned before.
+- Base your answer ONLY on the RELEVANT DOCUMENT EXCERPTS provided above.
 
 ---
 

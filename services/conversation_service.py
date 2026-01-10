@@ -130,16 +130,28 @@ class ConversationManager:
     def _summarize_context(self, history: List[Dict[str, str]]) -> str:
         """
         Create a brief summary of conversation context.
+        Only includes previous questions, NOT previous answers, to avoid confusion.
         """
         if not history:
-            return "No previous context"
+            return ""
         
-        user_questions = [msg.get("content", "")[:50] for msg in history if msg.get("role") == "user"]
+        # Only include user questions, NOT assistant responses
+        user_questions = []
+        for msg in history:
+            if msg.get("role") == "user":
+                content = msg.get("content", "")
+                if content:
+                    user_questions.append(content[:80])  # Limit length
+        
+        if not user_questions:
+            return ""
         
         if len(user_questions) == 1:
-            return f"Following up on: {user_questions[0]}"
+            return f"Previous question was about: {user_questions[0]}"
+        elif len(user_questions) <= 3:
+            return f"Previous questions: {'; '.join(user_questions)}"
         else:
-            return f"Continuing conversation ({len(user_questions)} previous questions)"
+            return f"Previous conversation ({len(user_questions)} questions about: {', '.join(user_questions[:2])}...)"
     
     def should_use_conversation_context(
         self,

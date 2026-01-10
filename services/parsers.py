@@ -49,6 +49,9 @@ def process_snag_query_json(
         # Use original query, not contextualized, to find relevant documents
         retrieval_query = user_query
         
+        # Check if this is an "all" type query - these should exclude conversation memory completely
+        is_list_all_query = any(word in user_query.lower() for word in ["all", "list all", "names of all", "who are all", "what are all"])
+        
         # Determine retrieval strategy based on session
         retrieved_docs: List[Document] = []
         db_to_use_for_chain = db  # Default to global
@@ -65,15 +68,22 @@ def process_snag_query_json(
             else:
                 logger.warning("⚠️  Session FAISS not found, falling back to GLOBAL_FAISS")
             
-            # Retrieve using original query and filter conversation memory
+            # Retrieve using original query
             all_retrieved = session_manager.retrieve_from_session(retrieval_query, k=10)
             
-            # Filter: Prioritize document chunks over conversation memory
+            # Filter: For "all" queries, completely exclude conversation memory
+            # For other queries, include max 1 conversation memory if needed
             doc_chunks = [doc for doc in all_retrieved if doc.metadata.get("type") != "conversation_memory"]
             conversation_memory = [doc for doc in all_retrieved if doc.metadata.get("type") == "conversation_memory"]
             
-            retrieved_docs = doc_chunks[:5] if len(doc_chunks) >= 5 else doc_chunks + conversation_memory[:1]
-            logger.info(f"Retrieved: {len(doc_chunks)} doc chunks, {len(conversation_memory)} memories, using {len(retrieved_docs)}")
+            if is_list_all_query:
+                # For "all" queries: ONLY document chunks, NO conversation memory
+                retrieved_docs = doc_chunks[:5] if len(doc_chunks) >= 5 else doc_chunks
+                logger.info(f"Retrieved for 'all' query: {len(doc_chunks)} doc chunks (conversation memory excluded)")
+            else:
+                # For regular queries: prioritize docs, include max 1 memory if needed
+                retrieved_docs = doc_chunks[:5] if len(doc_chunks) >= 5 else doc_chunks + conversation_memory[:1]
+                logger.info(f"Retrieved: {len(doc_chunks)} doc chunks, {len(conversation_memory)} memories, using {len(retrieved_docs)}")
             
         elif session_manager:
             # CASE 2: No uploaded file - retrieve from BOTH (global + session memory)
@@ -125,13 +135,34 @@ def process_snag_query_json(
         else:
             chain_to_use = chain
         
-        # Format question with citation context if available
-        llm_question = retrieval_query
+        # Format question clearly - for "all" type questions, exclude conversation memory to avoid repetition
+        is_list_all_query = any(word in user_query.lower() for word in ["all", "list all", "names of all", "who are all"])
+        
+        # For "all" queries, exclude conversation memory from retrieval to get fresh extraction
+        if is_list_all_query and retrieved_docs:
+            retrieved_docs = [doc for doc in retrieved_docs if doc.metadata.get("type") != "conversation_memory"]
+            logger.info(f"Filtered out conversation memory for 'all' query, using {len(retrieved_docs)} document chunks")
+        
+        # Format question - keep it simple and direct
+        if conversation_context and conversation_context.get('has_context') and not is_list_all_query:
+            # Only add context for non-list queries to avoid confusion
+            context_summary = conversation_context.get('context_summary', '')
+            if context_summary:
+                llm_question = f"""{user_query}
+
+[Previous context: {context_summary} - Answer ONLY the current question above, do not repeat previous answers]"""
+            else:
+                llm_question = user_query
+        else:
+            # For "all" queries or no context, use query directly - no conversation history
+            llm_question = user_query
+        
+        # Add citations if available
         if citation_text:
-            llm_question = f"{retrieval_query}\n\nAvailable citation IDs (reference these in your response):\n{citation_text}"
+            llm_question = f"{llm_question}\n\nAvailable citation IDs (reference these in your response):\n{citation_text}"
         
         # Get AI-generated rectification
-        # Use original query for retrieval to avoid matching old conversation
+        logger.info(f"Invoking LLM with question: {llm_question[:200]}...")
         response = chain_to_use.invoke({"question": llm_question})
         
         # Extract result and source documents
@@ -142,13 +173,13 @@ def process_snag_query_json(
             rectification_raw = str(response)
             source_documents = []
         
-        # Filter out conversation memory from source_documents
+        # Filter out conversation memory from source_documents (especially important for "all" queries)
         if source_documents:
             source_documents = [
                 doc for doc in source_documents 
                 if doc.metadata.get("type") != "conversation_memory"
             ]
-            logger.info(f"Filtered source_documents to {len(source_documents)} document chunks")
+            logger.info(f"Filtered source_documents to {len(source_documents)} document chunks (excluded conversation memory)")
         
         # Use retrieved_docs if no source_documents from chain
         if not source_documents:
@@ -352,15 +383,23 @@ def process_file_query_json(
             # The contextualized query is only for LLM understanding, not retrieval
             all_retrieved = session_manager.retrieve_from_session(retrieval_query, k=10)
             
-            # Filter: Prioritize document chunks (authoritative) over conversation memory
+            # Filter: For "all" queries, completely exclude conversation memory
+            # For other queries, include max 1 conversation memory if needed
             doc_chunks = [doc for doc in all_retrieved if doc.metadata.get("type") != "conversation_memory"]
             conversation_memory = [doc for doc in all_retrieved if doc.metadata.get("type") == "conversation_memory"]
             
-            # Use mostly document chunks, maybe 1 conversation memory if helpful
-            retrieved_docs = doc_chunks[:5] if len(doc_chunks) >= 5 else doc_chunks + conversation_memory[:1]
+            # Check if this is an "all" type query
+            is_list_all_query = any(word in user_query.lower() for word in ["all", "list all", "names of all", "who are all", "what are all"])
             
-            logger.info(f"Retrieved: {len(doc_chunks)} document chunks, {len(conversation_memory)} conversation memories")
-            logger.info(f"Using: {len(retrieved_docs)} documents (filtered to prioritize document chunks)")
+            if is_list_all_query:
+                # For "all" queries: ONLY document chunks, NO conversation memory
+                retrieved_docs = doc_chunks[:5] if len(doc_chunks) >= 5 else doc_chunks
+                logger.info(f"Retrieved for 'all' query: {len(doc_chunks)} document chunks (conversation memory completely excluded)")
+            else:
+                # For regular queries: prioritize docs, include max 1 memory if needed
+                retrieved_docs = doc_chunks[:5] if len(doc_chunks) >= 5 else doc_chunks + conversation_memory[:1]
+                logger.info(f"Retrieved: {len(doc_chunks)} document chunks, {len(conversation_memory)} conversation memories")
+                logger.info(f"Using: {len(retrieved_docs)} documents (filtered to prioritize document chunks)")
             
         elif session_manager:
             # CASE 2: No uploaded file - retrieve from BOTH (global + session memory)
@@ -424,15 +463,34 @@ def process_file_query_json(
                 citation_lines.append(f"{cit.get('id', 'unknown')}: {cit.get('text', '')[:100]}...")
             citation_text = "\n".join(citation_lines)
         
-        # Format question with citation context if available
-        llm_question = retrieval_query
+        # Format question clearly - for "all" type questions, exclude conversation memory to avoid repetition
+        is_list_all_query = any(word in user_query.lower() for word in ["all", "list all", "names of all", "who are all"])
+        
+        # For "all" queries, exclude conversation memory from retrieval to get fresh extraction
+        if is_list_all_query and retrieved_docs:
+            retrieved_docs = [doc for doc in retrieved_docs if doc.metadata.get("type") != "conversation_memory"]
+            logger.info(f"Filtered out conversation memory for 'all' query, using {len(retrieved_docs)} document chunks")
+        
+        # Format question - keep it simple and direct
+        if conversation_context and conversation_context.get('has_context') and not is_list_all_query:
+            # Only add context for non-list queries to avoid confusion
+            context_summary = conversation_context.get('context_summary', '')
+            if context_summary:
+                llm_question = f"""{user_query}
+
+[Previous context: {context_summary} - Answer ONLY the current question above, do not repeat previous answers]"""
+            else:
+                llm_question = user_query
+        else:
+            # For "all" queries or no context, use query directly - no conversation history
+            llm_question = user_query
+        
+        # Add citations if available
         if citation_text:
-            llm_question = f"{retrieval_query}\n\nAvailable citation IDs (reference these in your response):\n{citation_text}"
+            llm_question = f"{llm_question}\n\nAvailable citation IDs (reference these in your response):\n{citation_text}"
         
         # Get AI-generated rectification
-        # IMPORTANT: Use original query for retrieval to avoid matching old conversation
-        # The chain's retriever will search with this query, finding relevant documents
-        # The LLM will then answer based on those documents
+        logger.info(f"Invoking LLM with question: {llm_question[:200]}...")
         response = chain_to_use.invoke({"question": llm_question})
         
         # Extract result and source documents
